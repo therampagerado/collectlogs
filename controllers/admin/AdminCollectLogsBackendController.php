@@ -1,6 +1,7 @@
 <?php
 
 use CollectLogsModule\Severity;
+use CollectLogsModule\GithubIssueFormatter;
 
 /**
  * Copyright (C) 2017-2024 thirty bees
@@ -19,6 +20,9 @@ use CollectLogsModule\Severity;
  * @copyright 2017-2024 thirty bees
  * @license   Academic Free License (AFL 3.0)
  */
+
+require_once _PS_MODULE_DIR_.'collectlogs/classes/GithubIssueFormatter.php';
+require_once _PS_MODULE_DIR_.'collectlogs/classes/TransformMessage.php';
 
 class AdminCollectLogsBackendController extends ModuleAdminController
 {
@@ -39,24 +43,28 @@ class AdminCollectLogsBackendController extends ModuleAdminController
 
         parent::__construct();
 
-        $this->_select .= implode(",\n", [
+        // Build clean select
+        $this->_select = implode(",\n", [
             'extra.location',
             'extra.total',
             'extra.last_seen',
         ]);
-        $this->_select .= ',';
-        $this->_select .= ',';
-        $this->_defaultOrderBy = 'a.date_add';
-        $this->_defaultOrderWay = 'DESC';
+
+        // Order without alias (core backticks the token)
+        $this->_orderBy = 'date_add';
+        $this->_orderWay = 'DESC';
+
         $join = (new DbQuery())
             ->select('l.id_collectlogs_logs AS id_collectlogs_logs')
             ->select('CONCAT(l.file, IF(l.line, CONCAT(":", l.line), "")) AS location')
             ->select('SUM(s.count) AS total')
             ->select('DATEDIFF(NOW(), MAX(s.`dimension`)) AS last_seen')
             ->from('collectlogs_logs', 'l')
-            ->innerJoin('collectlogs_stats', 's', '(s.id_collectlogs_logs = l.id_collectlogs_logs)')
+            ->innerJoin('collectlogs_stats', 's', 's.id_collectlogs_logs = l.id_collectlogs_logs')
             ->groupBy('id_collectlogs_logs');
-        $this->_join .= " INNER JOIN ($join) AS extra ON (extra.id_collectlogs_logs = a.id_collectlogs_logs)";
+
+        // Embed the subquery
+        $this->_join .= ' INNER JOIN ('.$join->build().') AS extra ON (extra.id_collectlogs_logs = a.id_collectlogs_logs)';
 
         $this->actions = ['view', 'delete'];
         $this->bulk_actions = [
@@ -188,6 +196,7 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         $template = $this->createTemplate('log-view.tpl');
         $template->assign($log);
         $template->assign('extraSections', $extras);
+
         return $template->fetch();
     }
 
@@ -213,13 +222,107 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         $this->page_header_toolbar_btn['settings'] = [
             'icon' => 'process-icon-cogs',
             'href' => $this->context->link->getAdminLink('AdminModules', true, [
-                'configure' => $this->module->name,
-                'module_name' => $this->module->name
+                'configure'   => $this->module->name,
+                'module_name' => $this->module->name,
             ]),
             'desc' => $this->l('Settings'),
         ];
+
+        if (Tools::isSubmit('viewcollectlogs_logs')) {
+            $href = $this->context->link->getAdminLink(
+                'AdminCollectLogsBackend',
+                true,
+                [
+                    $this->identifier      => (int) Tools::getValue($this->identifier),
+                    'create_github_issue'  => 1,
+                ]
+            );
+
+            $this->page_header_toolbar_btn['github_issue'] = [
+                'icon' => 'process-icon-new',
+                'href' => $href,
+                'desc' => $this->l('Create GitHub issue'),
+                'target'     => '_blank',
+            ];
+        }
     }
 
+    /**
+     * @return void
+     * @throws PrestaShopException
+     * @throws SmartyException
+     */
+    public function postProcess()
+    {
+        parent::postProcess();
+
+        if (Tools::isSubmit('create_github_issue')) {
+            $this->processCreateGithubIssue();
+        }
+    }
+
+    /**
+     * Build the issue body and redirect to GitHub’s “new issue” page with
+     * prefilled title & body (GET params).
+     *
+     * @throws PrestaShopDatabaseException
+     * @throws PrestaShopException
+     * @throws SmartyException
+     */
+    protected function processCreateGithubIssue()
+    {
+        $id = (int) Tools::getValue($this->identifier);
+        if (!$id) {
+            $this->errors[] = $this->l('Missing log ID');
+            return;
+        }
+
+        $db = Db::getInstance();
+        $log = $db->getRow((new DbQuery())
+            ->select('*')
+            ->from('collectlogs_logs')
+            ->where('id_collectlogs_logs = '.$id)
+        );
+        if (!$log) {
+            $this->errors[] = $this->l('Object not found');
+            return;
+        }
+
+        $extras = $db->getArray((new DbQuery())
+            ->select('*')
+            ->from('collectlogs_extra')
+            ->where('id_collectlogs_logs = '.$id)
+        );
+
+        list($adminSeg, $adminFsPath) = $this->detectAdminFolder();
+
+        $transform = $this->module->getTransformMessage(); // returns the concrete implementation
+        $formatter = new GithubIssueFormatter(
+            $transform,
+            $adminSeg,
+            $adminFsPath
+        );
+        $body  = $formatter->format($log, $extras);
+
+        // Keep URL reasonably short — trim if huge (browser URL limits vary)
+        $max = 7000;
+        if (strlen($body) > $max) {
+            $body = substr($body, 0, $max) . "\n\n---\n" .
+                    '_[Truncated. See the error logs screen for full details.]_';
+        }
+
+        $title = sprintf('Error: %s (%s:%s)',
+            $log['type'] ?? 'Log',
+            $log['file'] ?? 'file',
+            $log['line'] ?? '?'
+        );
+
+        $url = 'https://github.com/thirtybees/thirtybees/issues/new'
+             . '?title=' . rawurlencode($title)
+             . '&body='  . rawurlencode($body);
+
+        Tools::redirectAdmin($url);
+    }
 
     /**
      * @param int $value
@@ -243,4 +346,13 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         return '<span class="badge badge-success">' . sprintf($this->l('%s days ago'), $value) . '</span>';
     }
 
+    /**
+     * @return array
+     */
+    private function detectAdminFolder(): array
+    {
+        $fsPath = PS_ADMIN_DIR;
+        $seg = basename($fsPath);
+        return [$seg, $fsPath];
+    }
 }
