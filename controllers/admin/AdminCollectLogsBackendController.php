@@ -1,6 +1,10 @@
 <?php
+
+use CollectLogsModule\Severity;
+use CollectLogsModule\GithubIssueFormatter;
+
 /**
- * Copyright (C) 2022-2022 thirty bees
+ * Copyright (C) 2017-2024 thirty bees
  *
  * NOTICE OF LICENSE
  *
@@ -13,12 +17,9 @@
  * to license@thirtybees.com so we can send you a copy immediately.
  *
  * @author    thirty bees <modules@thirtybees.com>
- * @copyright 2022 - 2022 thirty bees
+ * @copyright 2017-2024 thirty bees
  * @license   Academic Free License (AFL 3.0)
  */
-
-use CollectLogsModule\Severity;
-use CollectLogsModule\GithubIssueFormatter;
 
 require_once _PS_MODULE_DIR_.'collectlogs/classes/GithubIssueFormatter.php';
 require_once _PS_MODULE_DIR_.'collectlogs/classes/TransformMessage.php';
