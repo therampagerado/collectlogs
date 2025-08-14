@@ -1,9 +1,6 @@
 <?php
-
-use CollectLogsModule\Severity;
-
 /**
- * Copyright (C) 2017-2024 thirty bees
+ * Copyright (C) 2022-2022 thirty bees
  *
  * NOTICE OF LICENSE
  *
@@ -16,9 +13,15 @@ use CollectLogsModule\Severity;
  * to license@thirtybees.com so we can send you a copy immediately.
  *
  * @author    thirty bees <modules@thirtybees.com>
- * @copyright 2017-2024 thirty bees
+ * @copyright 2022 - 2022 thirty bees
  * @license   Academic Free License (AFL 3.0)
  */
+
+use CollectLogsModule\Severity;
+use CollectLogsModule\GithubIssueFormatter;
+
+require_once _PS_MODULE_DIR_.'collectlogs/classes/GithubIssueFormatter.php';
+require_once _PS_MODULE_DIR_.'collectlogs/classes/TransformMessage.php';
 
 class AdminCollectLogsBackendController extends ModuleAdminController
 {
@@ -39,24 +42,28 @@ class AdminCollectLogsBackendController extends ModuleAdminController
 
         parent::__construct();
 
-        $this->_select .= implode(",\n", [
+        // Build clean select
+        $this->_select = implode(",\n", [
             'extra.location',
             'extra.total',
             'extra.last_seen',
         ]);
-        $this->_select .= ',';
-        $this->_select .= ',';
-        $this->_defaultOrderBy = 'a.date_add';
-        $this->_defaultOrderWay = 'DESC';
+
+        // Order without alias (core backticks the token)
+        $this->_orderBy = 'date_add';
+        $this->_orderWay = 'DESC';
+
         $join = (new DbQuery())
             ->select('l.id_collectlogs_logs AS id_collectlogs_logs')
             ->select('CONCAT(l.file, IF(l.line, CONCAT(":", l.line), "")) AS location')
             ->select('SUM(s.count) AS total')
             ->select('DATEDIFF(NOW(), MAX(s.`dimension`)) AS last_seen')
             ->from('collectlogs_logs', 'l')
-            ->innerJoin('collectlogs_stats', 's', '(s.id_collectlogs_logs = l.id_collectlogs_logs)')
+            ->innerJoin('collectlogs_stats', 's', 's.id_collectlogs_logs = l.id_collectlogs_logs')
             ->groupBy('id_collectlogs_logs');
-        $this->_join .= " INNER JOIN ($join) AS extra ON (extra.id_collectlogs_logs = a.id_collectlogs_logs)";
+
+        // Embed the subquery
+        $this->_join .= ' INNER JOIN ('.$join->build().') AS extra ON (extra.id_collectlogs_logs = a.id_collectlogs_logs)';
 
         $this->actions = ['view', 'delete'];
         $this->bulk_actions = [
@@ -188,6 +195,10 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         $template = $this->createTemplate('log-view.tpl');
         $template->assign($log);
         $template->assign('extraSections', $extras);
+        
+        $formatter = new GithubIssueFormatter($this->module->getTransformMessage());
+        $template->assign('githubIssue', $formatter->format($log, $extras));
+        
         return $template->fetch();
     }
 
@@ -213,13 +224,101 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         $this->page_header_toolbar_btn['settings'] = [
             'icon' => 'process-icon-cogs',
             'href' => $this->context->link->getAdminLink('AdminModules', true, [
-                'configure' => $this->module->name,
-                'module_name' => $this->module->name
+                'configure'   => $this->module->name,
+                'module_name' => $this->module->name,
             ]),
             'desc' => $this->l('Settings'),
         ];
+
+        if (Tools::isSubmit('viewcollectlogs_logs')) {
+            $href = $this->context->link->getAdminLink(
+                'AdminCollectLogsBackend',
+                true,
+                [
+                    $this->identifier      => (int) Tools::getValue($this->identifier),
+                    'create_github_issue'  => 1,
+                ]
+            );
+
+            $this->page_header_toolbar_btn['github_issue'] = [
+                'icon' => 'process-icon-new',
+                'href' => $href,
+                'desc' => $this->l('Create GitHub issue'),
+                'target'     => '_blank',
+            ];
+        }
+    }
+    
+    public function postProcess()
+    {
+        parent::postProcess();
+
+        if (Tools::isSubmit('create_github_issue')) {
+            $this->processCreateGithubIssue();
+        }
     }
 
+    /**
+     * Build the issue body and redirect to GitHub’s “new issue” page with
+     * prefilled title & body (GET params).
+     *
+     * @throws PrestaShopDatabaseException
+     * @throws PrestaShopException
+     */
+    protected function processCreateGithubIssue()
+    {
+        $id = (int) Tools::getValue($this->identifier);
+        if (!$id) {
+            $this->errors[] = $this->l('Missing log ID');
+            return;
+        }
+
+        $db = Db::getInstance();
+        $log = $db->getRow((new DbQuery())
+            ->select('*')
+            ->from('collectlogs_logs')
+            ->where('id_collectlogs_logs = '.$id)
+        );
+        if (!$log) {
+            $this->errors[] = $this->l('Object not found');
+            return;
+        }
+
+        $extras = $db->getArray((new DbQuery())
+            ->select('*')
+            ->from('collectlogs_extra')
+            ->where('id_collectlogs_logs = '.$id)
+        );
+
+        list($adminSeg, $adminFsPath) = $this->detectAdminFolder();
+
+        $transform = $this->module->getTransformMessage(); // returns the concrete implementation
+        $formatter = new \CollectLogsModule\GithubIssueFormatter(
+            $transform,
+            $adminSeg,
+            $adminFsPath
+        );
+        $body  = $formatter->format($log, $extras);
+
+        // Keep URL reasonably short — trim if huge (browser URL limits vary)
+        $max = 7000;
+        if (Tools::strlen($body) > $max) {
+            $body = Tools::substr($body, 0, $max) . "\n\n---\n" .
+                    '_[Truncated. See the error logs screen for full details.]_';
+        }
+
+        $title = sprintf('Error: %s (%s:%s)',
+            isset($log['type']) ? $log['type'] : 'Log',
+            isset($log['file']) ? $log['file'] : 'file',
+            isset($log['line']) ? $log['line'] : '?'
+        );
+
+        $url = 'https://github.com/thirtybees/thirtybees/issues/new'
+             . '?title=' . rawurlencode($title)
+             . '&body='  . rawurlencode($body);
+
+        Tools::redirectAdmin($url);
+    }
 
     /**
      * @param int $value
@@ -243,4 +342,42 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         return '<span class="badge badge-success">' . sprintf($this->l('%s days ago'), $value) . '</span>';
     }
 
+    private function detectAdminFolder(): array
+    {
+        $seg = null;
+        $fsPath = null;
+
+        // A) Filesystem: admin/index.php → dirname is the admin folder
+        if (!empty($_SERVER['SCRIPT_FILENAME'])) {
+            $dir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_FILENAME']));
+            $base = basename($dir);
+            if ($base && preg_match('/^admin(?:-dev|[0-9A-Za-z_-]*)$/i', $base)) {
+                $seg = $base;
+                $fsPath = $dir;
+                return [$seg, $fsPath];
+            }
+        }
+
+        // B) URL path after __PS_BASE_URI__: /<base>/admin123/index.php
+        $path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+        if ($path !== '' && defined('__PS_BASE_URI__')) {
+            $rest = ltrim(substr($path, strlen(__PS_BASE_URI__)), '/');
+            $first = strtok($rest, '/');
+            if ($first && preg_match('/^admin(?:-dev|[0-9A-Za-z_-]*)$/i', $first)) {
+                $seg = $first;
+                // Try to guess FS path from SCRIPT_FILENAME if available
+                if (!empty($_SERVER['SCRIPT_FILENAME'])) {
+                    $sfDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_FILENAME']));
+                    // If the current script is in /.../<seg>, use that
+                    if (preg_match('#/'.preg_quote($seg, '#').'$#i', $sfDir)) {
+                        $fsPath = $sfDir;
+                    }
+                }
+                return [$seg, $fsPath];
+            }
+        }
+
+        // C) Last resort: nothing detected
+        return [null, null];
+    }
 }
