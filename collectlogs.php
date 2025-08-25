@@ -53,7 +53,7 @@ class CollectLogs extends Module
     {
         $this->name = 'collectlogs';
         $this->tab = 'administaration';
-        $this->version = '1.3.1';
+        $this->version = '1.4.0';
         $this->author = 'thirty bees';
         $this->need_instance = 0;
         $this->bootstrap = true;
