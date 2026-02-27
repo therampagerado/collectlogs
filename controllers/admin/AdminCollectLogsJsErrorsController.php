@@ -32,7 +32,6 @@ class AdminCollectLogsJsErrorsController extends ModuleAdminController
     public function __construct()
     {
         $this->table      = 'collectlogs_js_error';
-        $this->className  = 'ObjectModel'; // We use raw DB — no ObjectModel needed
         $this->identifier = 'id_collectlogs_js_error';
         $this->bootstrap  = true;
         $this->lang       = false;
