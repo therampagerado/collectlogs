@@ -205,7 +205,9 @@ class CollectLogs extends Module
     public function ensureJsErrorsTable()
     {
         $table = _DB_PREFIX_ . 'collectlogs_js_error';
-        $exists = (bool)Db::getInstance()->getValue("SHOW TABLES LIKE '" . pSQL($table) . "'");
+        $exists = (bool)Db::getInstance()->getValue(
+            "SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" . pSQL($table) . "'"
+        );
         if ($exists) {
             return true;
         }
