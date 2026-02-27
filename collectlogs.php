@@ -49,6 +49,14 @@ class CollectLogs extends Module
     const ACTION_UNSUBSCRIBE = 'unsubscribe';
     const MIN_PHP_VERSION = '7.1';
 
+    // JS error logging config keys
+    const INPUT_JS_LOGGING_ENABLED = 'JS_LOGGING_ENABLED';
+    const INPUT_JS_SAMPLING_RATE   = 'JS_SAMPLING_RATE';
+    const INPUT_JS_MAX_EVENTS      = 'JS_MAX_EVENTS';
+    const INPUT_JS_INCLUDE_QS      = 'JS_INCLUDE_QS';
+    const INPUT_JS_INCLUDE_STACK   = 'JS_INCLUDE_STACK';
+    const INPUT_JS_RETENTION_DAYS  = 'JS_RETENTION_DAYS';
+
     public function __construct()
     {
         $this->name = 'collectlogs';
@@ -59,11 +67,11 @@ class CollectLogs extends Module
         $this->bootstrap = true;
 
         parent::__construct();
-        $this->displayName = $this->l('Collect PHP Logs');
-        $this->description = $this->l('Debugging module that collects PHP logs');
+        $this->displayName = $this->l('Collect Logs');
+        $this->description = $this->l('Debugging module that collects PHP and client-side JS logs');
         $this->ps_versions_compliancy = ['min' => '1.6', 'max' => '1.6.999'];
         $this->tb_min_version = '1.4.0';
-        $this->controllers = ['cron', 'api'];
+        $this->controllers = ['cron', 'api', 'jslog'];
     }
 
     /**
@@ -87,8 +95,11 @@ class CollectLogs extends Module
             $requirements &&
             parent::install() &&
             $this->installTab() &&
+            $this->installJsErrorsTab() &&
             $this->installDb($createTables) &&
-            $this->registerHook('actionRegisterErrorHandlers')
+            $this->registerHook('actionRegisterErrorHandlers') &&
+            $this->registerHook('header') &&
+            $this->registerHook('displayHeader')
         );
     }
 
@@ -105,6 +116,32 @@ class CollectLogs extends Module
             $this->uninstallDb($dropTables) &&
             parent::uninstall()
         );
+    }
+
+    /**
+     * Install Back-office tab for JS error viewer.
+     *
+     * @return bool
+     * @throws PrestaShopDatabaseException
+     * @throws PrestaShopException
+     */
+    private function installJsErrorsTab()
+    {
+        $parentId = Tab::getIdFromClassName('AdminCollectLogsBackend');
+        if ($parentId === false) {
+            $parentId = $this->getTabParent();
+        }
+
+        $tab = new Tab();
+        $tab->active     = 1;
+        $tab->class_name = 'AdminCollectLogsJsErrors';
+        $tab->module     = $this->name;
+        $tab->id_parent  = $parentId;
+        $tab->name       = [];
+        foreach (Language::getLanguages(true) as $lang) {
+            $tab->name[$lang['id_lang']] = $this->l('JS Error logs');
+        }
+        return $tab->add();
     }
 
     /**
@@ -250,6 +287,83 @@ class CollectLogs extends Module
             }
             $errorHandler->addLogger($logger, true);
         }
+    }
+
+    /**
+     * hookHeader / hookDisplayHeader – inject JS error capture script on FO pages.
+     *
+     * Both hooks are registered so the script is injected regardless of the
+     * theme's hook naming convention.  Duplicate injection is prevented by a
+     * static flag.
+     *
+     * @return void
+     * @throws PrestaShopException
+     */
+    public function hookHeader()
+    {
+        $this->injectJsErrorScript();
+    }
+
+    /** @return void */
+    public function hookDisplayHeader()
+    {
+        $this->injectJsErrorScript();
+    }
+
+    /**
+     * Build a short-lived signed token and inject the JS error capture script.
+     *
+     * Token format:  base64url(id_shop:timestamp:nonce) . '.' . hmac_sha256
+     *
+     * @return void
+     * @throws PrestaShopException
+     */
+    protected function injectJsErrorScript()
+    {
+        static $injected = false;
+        if ($injected) {
+            return;
+        }
+        $injected = true;
+
+        $settings = $this->getSettings();
+        if (!$settings->getJsLoggingEnabled()) {
+            return;
+        }
+
+        $idShop = (int)$this->context->shop->id;
+        $ts     = time();
+        $nonce  = Tools::passwdGen(8);
+        $rawPayload = $idShop . ':' . $ts . ':' . $nonce;
+        $hmac       = hash_hmac('sha256', $rawPayload, _COOKIE_KEY_);
+        $token      = strtr(base64_encode($rawPayload), '+/', '-_') . '.' . $hmac;
+
+        $endpoint = $this->context->link->getModuleLink($this->name, 'jslog', [], true);
+
+        $lang = $this->context->language;
+        $currency = $this->context->currency;
+        $controller = Tools::getValue('controller', '');
+
+        $cfg = [
+            'endpoint'     => $endpoint,
+            'token'        => $token,
+            'shopId'       => $idShop,
+            'sampling'     => (int)$settings->getJsSamplingRate(),
+            'maxEvents'    => (int)$settings->getJsMaxEvents(),
+            'includeQS'    => (bool)$settings->getJsIncludeQueryString(),
+            'includeStack' => (bool)$settings->getJsIncludeStackTrace(),
+            'tags'         => [
+                'tb_version'  => _TB_VERSION_,
+                'theme'       => $this->context->shop->theme_name ?? '',
+                'page_type'   => $controller,
+                'controller'  => $controller,
+                'currency'    => $currency ? $currency->iso_code : '',
+                'lang'        => $lang ? $lang->iso_code : '',
+            ],
+        ];
+
+        Media::addJsDef(['collectlogsJsCfg' => $cfg]);
+        $this->context->controller->addJs($this->_path . 'views/js/collectlogs-jserrors.js');
     }
 
     /**
@@ -460,18 +574,103 @@ class CollectLogs extends Module
         $helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false).'&configure='.$this->name.'&tab_module='.$this->tab.'&module_name='.$this->name;
         $helper->token = Tools::getAdminTokenLite('AdminModules');
         $helper->languages = $controller->getLanguages();
+        $jsErrorsUrl = $this->context->link->getAdminLink('AdminCollectLogsJsErrors');
+
+        $jsLoggingForm = [
+            'form' => [
+                'legend' => [
+                    'title' => $this->l('Client-side JS Error Logging'),
+                    'icon'  => 'icon-bug',
+                ],
+                'description' => Translate::ppTags(
+                    $this->l('When enabled, a small script is injected on every FO page to capture runtime JS errors and send them to [1]JS Error Logs[/1].'),
+                    ['<a href="' . $jsErrorsUrl . '">']
+                ),
+                'input' => [
+                    [
+                        'type'    => 'switch',
+                        'label'   => $this->l('Enable JS error logging'),
+                        'desc'    => $this->l('Inject the capture script on all front-office pages'),
+                        'name'    => static::INPUT_JS_LOGGING_ENABLED,
+                        'is_bool' => true,
+                        'values'  => [
+                            ['id' => 'js_on',  'value' => 1, 'label' => $this->l('Enabled')],
+                            ['id' => 'js_off', 'value' => 0, 'label' => $this->l('Disabled')],
+                        ],
+                    ],
+                    [
+                        'type'  => 'text',
+                        'label' => $this->l('Sampling rate (%)'),
+                        'desc'  => $this->l('Percentage of page sessions that will capture errors. 100 = all sessions, 10 = 10% of sessions.'),
+                        'name'  => static::INPUT_JS_SAMPLING_RATE,
+                        'class' => 'fixed-width-sm',
+                        'suffix' => '%',
+                    ],
+                    [
+                        'type'  => 'text',
+                        'label' => $this->l('Max events per page'),
+                        'desc'  => $this->l('Maximum number of JS error events captured per page view (1–100).'),
+                        'name'  => static::INPUT_JS_MAX_EVENTS,
+                        'class' => 'fixed-width-sm',
+                    ],
+                    [
+                        'type'    => 'switch',
+                        'label'   => $this->l('Include URL query strings'),
+                        'desc'    => $this->l('When disabled (recommended), query strings are stripped from reported URLs to protect visitor privacy.'),
+                        'name'    => static::INPUT_JS_INCLUDE_QS,
+                        'is_bool' => true,
+                        'values'  => [
+                            ['id' => 'qs_on',  'value' => 1, 'label' => $this->l('Include')],
+                            ['id' => 'qs_off', 'value' => 0, 'label' => $this->l('Strip')],
+                        ],
+                    ],
+                    [
+                        'type'    => 'switch',
+                        'label'   => $this->l('Include stack traces'),
+                        'desc'    => $this->l('Send parsed stack frames with each error event. Recommended for debugging.'),
+                        'name'    => static::INPUT_JS_INCLUDE_STACK,
+                        'is_bool' => true,
+                        'values'  => [
+                            ['id' => 'stack_on',  'value' => 1, 'label' => $this->l('Enabled')],
+                            ['id' => 'stack_off', 'value' => 0, 'label' => $this->l('Disabled')],
+                        ],
+                    ],
+                    [
+                        'type'  => 'text',
+                        'label' => $this->l('Retention (days)'),
+                        'desc'  => $this->l('JS error records older than this many days are deleted when "Prune old records" is clicked in the JS Error Logs screen. Set to 0 to disable auto-pruning.'),
+                        'name'  => static::INPUT_JS_RETENTION_DAYS,
+                        'class' => 'fixed-width-sm',
+                        'suffix' => $this->l('days'),
+                    ],
+                ],
+                'submit' => [
+                    'title' => $this->l('Save'),
+                    'name'  => static::ACTION_SUBMIT_SETTINGS,
+                ],
+            ],
+        ];
+
         $helper->fields_value = [
             static::INPUT_SEND_NEW_ERRORS_EMAIL => $settings->getSendNewErrorsEmail(),
             static::INPUT_EMAIL_ADDRESSES => implode("\n", $settings->getEmailAddresses()),
             static::INPUT_LOG_TO_FILE => $settings->getLogToFile(),
             static::INPUT_LOG_TO_FILE_NEW_ONLY => $settings->getLogToFileNewOnly(),
             static::INPUT_LOG_TO_FILE_SEVERITY => $settings->getLogToFileMinSeverity(),
+            // JS logging
+            static::INPUT_JS_LOGGING_ENABLED => $settings->getJsLoggingEnabled(),
+            static::INPUT_JS_SAMPLING_RATE   => $settings->getJsSamplingRate(),
+            static::INPUT_JS_MAX_EVENTS      => $settings->getJsMaxEvents(),
+            static::INPUT_JS_INCLUDE_QS      => $settings->getJsIncludeQueryString(),
+            static::INPUT_JS_INCLUDE_STACK   => $settings->getJsIncludeStackTrace(),
+            static::INPUT_JS_RETENTION_DAYS  => $settings->getJsRetentionDays(),
         ];
 
         return $helper->generateForm([
             $infoForm,
             $fileLoggingForm,
             $cronForm,
+            $jsLoggingForm,
         ]);
     }
 
@@ -651,6 +850,13 @@ class CollectLogs extends Module
             $settings->setLogToFile((bool)Tools::getValue(static::INPUT_LOG_TO_FILE));
             $settings->setLogToFileNewOnly((bool)Tools::getValue(static::INPUT_LOG_TO_FILE_NEW_ONLY));
             $settings->setLogToFileMinSeverity((int)Tools::getValue(static::INPUT_LOG_TO_FILE_SEVERITY));
+            // JS logging settings
+            $settings->setJsLoggingEnabled((bool)Tools::getValue(static::INPUT_JS_LOGGING_ENABLED));
+            $settings->setJsSamplingRate((int)Tools::getValue(static::INPUT_JS_SAMPLING_RATE));
+            $settings->setJsMaxEvents((int)Tools::getValue(static::INPUT_JS_MAX_EVENTS));
+            $settings->setJsIncludeQueryString((bool)Tools::getValue(static::INPUT_JS_INCLUDE_QS));
+            $settings->setJsIncludeStackTrace((bool)Tools::getValue(static::INPUT_JS_INCLUDE_STACK));
+            $settings->setJsRetentionDays((int)Tools::getValue(static::INPUT_JS_RETENTION_DAYS));
             $this->getTransformMessage()->synchronize(true);
             $controller->confirmations[] = $this->l('Settings saved');
         }
