@@ -18,6 +18,12 @@ class Settings
     const SETTINGS_LOG_TO_FILE_NEW_ONLY = 'COLLECTLOGS_LOG_TO_FILE_NEW_ONLY';
     const SETTINGS_LOG_TO_FILE_SEVERITY = 'COLLECTLOGS_LOG_TO_FILE_SEVERITY';
     const SETTINGS_LAST_SYNC = 'COLLECTLOGS_SYNC_TS';
+    const SETTINGS_CLIENT_LOGGING_ENABLED = 'COLLECTLOGS_CLIENT_LOGGING_ENABLED';
+    const SETTINGS_CLIENT_LOGGING_SAMPLE_RATE = 'COLLECTLOGS_CLIENT_LOGGING_SAMPLE_RATE';
+    const SETTINGS_CLIENT_LOGGING_MAX_EVENTS = 'COLLECTLOGS_CLIENT_LOGGING_MAX_EVENTS';
+    const SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY = 'COLLECTLOGS_CLIENT_LOGGING_INCLUDE_QUERY';
+    const SETTINGS_CLIENT_LOGGING_INCLUDE_STACK = 'COLLECTLOGS_CLIENT_LOGGING_INCLUDE_STACK';
+    const SETTINGS_CLIENT_LOGGING_RETENTION_DAYS = 'COLLECTLOGS_CLIENT_LOGGING_RETENTION_DAYS';
 
     /**
      * @return bool
@@ -247,6 +253,84 @@ class Settings
     public function getUnsubscribeSecret($email)
     {
         return md5($email . $this->getSecret());
+    }
+
+    public function getClientLoggingEnabled()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_ENABLED, true);
+    }
+
+    public function setClientLoggingEnabled($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_ENABLED, $value);
+    }
+
+    public function getClientLoggingSampleRate()
+    {
+        $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_SAMPLE_RATE);
+        if ($value < 1 || $value > 100) {
+            return $this->setClientLoggingSampleRate(100);
+        }
+        return $value;
+    }
+
+    public function setClientLoggingSampleRate($value)
+    {
+        $value = max(1, min(100, (int)$value));
+        Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_SAMPLE_RATE, $value);
+        return $value;
+    }
+
+    public function getClientLoggingMaxEvents()
+    {
+        $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_MAX_EVENTS);
+        if ($value < 1 || $value > 100) {
+            return $this->setClientLoggingMaxEvents(10);
+        }
+        return $value;
+    }
+
+    public function setClientLoggingMaxEvents($value)
+    {
+        $value = max(1, min(100, (int)$value));
+        Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_MAX_EVENTS, $value);
+        return $value;
+    }
+
+    public function getClientLoggingIncludeQueryString()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY, false);
+    }
+
+    public function setClientLoggingIncludeQueryString($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY, $value);
+    }
+
+    public function getClientLoggingIncludeStackTrace()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_STACK, true);
+    }
+
+    public function setClientLoggingIncludeStackTrace($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_STACK, $value);
+    }
+
+    public function getClientLoggingRetentionDays()
+    {
+        $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS);
+        if ($value < 1 || $value > 3650) {
+            return $this->setClientLoggingRetentionDays(30);
+        }
+        return $value;
+    }
+
+    public function setClientLoggingRetentionDays($value)
+    {
+        $value = max(1, min(3650, (int)$value));
+        Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS, $value);
+        return $value;
     }
 
 
