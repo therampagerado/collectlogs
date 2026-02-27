@@ -382,7 +382,10 @@ class CollectLogs extends Module
         $hmac       = hash_hmac('sha256', $rawPayload, _COOKIE_KEY_);
         $token      = strtr(base64_encode($rawPayload), '+/', '-_') . '.' . $hmac;
 
-        $endpoint = $this->context->link->getModuleLink($this->name, 'jslog', [], true);
+        // Keep the endpoint on the same scheme as the current page.
+        // Forcing HTTPS here can break logging on HTTP shops due to
+        // cross-origin/mixed-scheme requests.
+        $endpoint = $this->context->link->getModuleLink($this->name, 'jslog');
 
         $lang = $this->context->language;
         $currency = $this->context->currency;
