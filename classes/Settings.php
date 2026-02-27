@@ -18,6 +18,12 @@ class Settings
     const SETTINGS_LOG_TO_FILE_NEW_ONLY = 'COLLECTLOGS_LOG_TO_FILE_NEW_ONLY';
     const SETTINGS_LOG_TO_FILE_SEVERITY = 'COLLECTLOGS_LOG_TO_FILE_SEVERITY';
     const SETTINGS_LAST_SYNC = 'COLLECTLOGS_SYNC_TS';
+    const SETTINGS_CLIENT_LOGGING_ENABLED = 'COLLECTLOGS_CLIENT_LOGGING_ENABLED';
+    const SETTINGS_CLIENT_LOGGING_SAMPLING = 'COLLECTLOGS_CLIENT_LOGGING_SAMPLING';
+    const SETTINGS_CLIENT_LOGGING_MAX_EVENTS = 'COLLECTLOGS_CLIENT_LOGGING_MAX_EVENTS';
+    const SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY = 'COLLECTLOGS_CLIENT_LOGGING_INCLUDE_QUERY';
+    const SETTINGS_CLIENT_LOGGING_INCLUDE_STACK = 'COLLECTLOGS_CLIENT_LOGGING_INCLUDE_STACK';
+    const SETTINGS_CLIENT_LOGGING_RETENTION_DAYS = 'COLLECTLOGS_CLIENT_LOGGING_RETENTION_DAYS';
 
     /**
      * @return bool
@@ -249,5 +255,140 @@ class Settings
         return md5($email . $this->getSecret());
     }
 
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function getClientLoggingEnabled()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_ENABLED, true);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function setClientLoggingEnabled($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_ENABLED, $value);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function getClientLoggingSamplingRate()
+    {
+        $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_SAMPLING);
+        if ($value < 1 || $value > 100) {
+            $value = 100;
+            Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_SAMPLING, $value);
+        }
+        return $value;
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function setClientLoggingSamplingRate($value)
+    {
+        $value = (int)$value;
+        if ($value < 1) {
+            $value = 1;
+        }
+        if ($value > 100) {
+            $value = 100;
+        }
+        Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_SAMPLING, $value);
+        return $value;
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function getClientLoggingMaxEvents()
+    {
+        $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_MAX_EVENTS);
+        if ($value < 1 || $value > 100) {
+            $value = 10;
+            Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_MAX_EVENTS, $value);
+        }
+        return $value;
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function setClientLoggingMaxEvents($value)
+    {
+        $value = (int)$value;
+        if ($value < 1) {
+            $value = 1;
+        }
+        if ($value > 100) {
+            $value = 100;
+        }
+        Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_MAX_EVENTS, $value);
+        return $value;
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function getClientLoggingIncludeQueryString()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY, false);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function setClientLoggingIncludeQueryString($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY, $value);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function getClientLoggingIncludeStackTrace()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_STACK, true);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function setClientLoggingIncludeStackTrace($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_STACK, $value);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function getClientLoggingRetentionDays()
+    {
+        $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS);
+        if ($value < 1 || $value > 3650) {
+            $value = 30;
+            Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS, $value);
+        }
+        return $value;
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function setClientLoggingRetentionDays($value)
+    {
+        $value = (int)$value;
+        if ($value < 1) {
+            $value = 1;
+        }
+        if ($value > 3650) {
+            $value = 3650;
+        }
+        Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS, $value);
+        return $value;
+    }
 
 }

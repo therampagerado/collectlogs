@@ -47,13 +47,19 @@ class CollectLogs extends Module
     const ACTION_SUBMIT_SETTINGS = 'ACTION_SUBMIT_SETTINGS';
     const ACTION_DELETE_OLDER_THAN_DAYS = 'ACTION_DELETE_OLDER_THAN_DAYS';
     const ACTION_UNSUBSCRIBE = 'unsubscribe';
+    const INPUT_CLIENT_LOGGING_ENABLED = 'CLIENT_LOGGING_ENABLED';
+    const INPUT_CLIENT_LOGGING_SAMPLING = 'CLIENT_LOGGING_SAMPLING';
+    const INPUT_CLIENT_LOGGING_MAX_EVENTS = 'CLIENT_LOGGING_MAX_EVENTS';
+    const INPUT_CLIENT_LOGGING_INCLUDE_QUERY = 'CLIENT_LOGGING_INCLUDE_QUERY';
+    const INPUT_CLIENT_LOGGING_INCLUDE_STACK = 'CLIENT_LOGGING_INCLUDE_STACK';
+    const INPUT_CLIENT_LOGGING_RETENTION_DAYS = 'CLIENT_LOGGING_RETENTION_DAYS';
     const MIN_PHP_VERSION = '7.1';
 
     public function __construct()
     {
         $this->name = 'collectlogs';
         $this->tab = 'administaration';
-        $this->version = '1.4.0';
+        $this->version = '1.5.0';
         $this->author = 'thirty bees';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -63,7 +69,7 @@ class CollectLogs extends Module
         $this->description = $this->l('Debugging module that collects PHP logs');
         $this->ps_versions_compliancy = ['min' => '1.6', 'max' => '1.6.999'];
         $this->tb_min_version = '1.4.0';
-        $this->controllers = ['cron', 'api'];
+        $this->controllers = ['cron', 'api', 'jslog'];
     }
 
     /**
@@ -88,7 +94,8 @@ class CollectLogs extends Module
             parent::install() &&
             $this->installTab() &&
             $this->installDb($createTables) &&
-            $this->registerHook('actionRegisterErrorHandlers')
+            $this->registerHook('actionRegisterErrorHandlers') &&
+            $this->registerHook('header')
         );
     }
 
@@ -152,17 +159,28 @@ class CollectLogs extends Module
      * @throws PrestaShopDatabaseException
      * @throws PrestaShopException
      */
-    private function installTab() {
-        $tab = new Tab();
-        $tab->active = 1;
-        $tab->class_name = 'AdminCollectLogsBackend';
-        $tab->module = $this->name;
-        $tab->id_parent = $this->getTabParent();
-        $tab->name = array();
-        foreach (Language::getLanguages(true) as $lang) {
-            $tab->name[$lang['id_lang']] = $this->l('Error logs');
+    public function installTab() {
+        $tabs = [
+            'AdminCollectLogsBackend' => $this->l('PHP Error logs'),
+            'AdminCollectLogsJs' => $this->l('JS Error logs'),
+        ];
+        $ok = true;
+        foreach ($tabs as $className => $label) {
+            if (Tab::getIdFromClassName($className)) {
+                continue;
+            }
+            $tab = new Tab();
+            $tab->active = 1;
+            $tab->class_name = $className;
+            $tab->module = $this->name;
+            $tab->id_parent = $this->getTabParent();
+            $tab->name = array();
+            foreach (Language::getLanguages(true) as $lang) {
+                $tab->name[$lang['id_lang']] = $label;
+            }
+            $ok = $tab->add() && $ok;
         }
-        return $tab->add();
+        return $ok;
     }
 
     /**
@@ -395,6 +413,66 @@ class CollectLogs extends Module
             ],
         ];
 
+        $clientLoggingForm = [
+            'form' => [
+                'legend' => [
+                    'title' => $this->l('Client-side JS logging'),
+                    'icon' => 'icon-desktop',
+                ],
+                'input' => [
+                    [
+                        'type' => 'switch',
+                        'label' => $this->l('Enable client logging'),
+                        'name' => static::INPUT_CLIENT_LOGGING_ENABLED,
+                        'is_bool' => true,
+                        'values' => [
+                            ['id' => 'cl_on', 'value' => 1, 'label' => $this->l('Enabled')],
+                            ['id' => 'cl_off', 'value' => 0, 'label' => $this->l('Disabled')],
+                        ],
+                    ],
+                    [
+                        'type' => 'text',
+                        'label' => $this->l('Sampling rate (%)'),
+                        'name' => static::INPUT_CLIENT_LOGGING_SAMPLING,
+                    ],
+                    [
+                        'type' => 'text',
+                        'label' => $this->l('Max events per page'),
+                        'name' => static::INPUT_CLIENT_LOGGING_MAX_EVENTS,
+                    ],
+                    [
+                        'type' => 'switch',
+                        'label' => $this->l('Include query string'),
+                        'name' => static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY,
+                        'is_bool' => true,
+                        'values' => [
+                            ['id' => 'cl_q_on', 'value' => 1, 'label' => $this->l('Yes')],
+                            ['id' => 'cl_q_off', 'value' => 0, 'label' => $this->l('No')],
+                        ],
+                    ],
+                    [
+                        'type' => 'switch',
+                        'label' => $this->l('Include stack traces'),
+                        'name' => static::INPUT_CLIENT_LOGGING_INCLUDE_STACK,
+                        'is_bool' => true,
+                        'values' => [
+                            ['id' => 'cl_s_on', 'value' => 1, 'label' => $this->l('Yes')],
+                            ['id' => 'cl_s_off', 'value' => 0, 'label' => $this->l('No')],
+                        ],
+                    ],
+                    [
+                        'type' => 'text',
+                        'label' => $this->l('Retention (days)'),
+                        'name' => static::INPUT_CLIENT_LOGGING_RETENTION_DAYS,
+                    ],
+                ],
+                'submit' => [
+                    'title' => $this->l('Save'),
+                    'name' => static::ACTION_SUBMIT_SETTINGS,
+                ],
+            ],
+        ];
+
         $cronForm = [
             'form' => [
                 'legend' => [
@@ -466,11 +544,18 @@ class CollectLogs extends Module
             static::INPUT_LOG_TO_FILE => $settings->getLogToFile(),
             static::INPUT_LOG_TO_FILE_NEW_ONLY => $settings->getLogToFileNewOnly(),
             static::INPUT_LOG_TO_FILE_SEVERITY => $settings->getLogToFileMinSeverity(),
+            static::INPUT_CLIENT_LOGGING_ENABLED => $settings->getClientLoggingEnabled(),
+            static::INPUT_CLIENT_LOGGING_SAMPLING => $settings->getClientLoggingSamplingRate(),
+            static::INPUT_CLIENT_LOGGING_MAX_EVENTS => $settings->getClientLoggingMaxEvents(),
+            static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY => $settings->getClientLoggingIncludeQueryString(),
+            static::INPUT_CLIENT_LOGGING_INCLUDE_STACK => $settings->getClientLoggingIncludeStackTrace(),
+            static::INPUT_CLIENT_LOGGING_RETENTION_DAYS => $settings->getClientLoggingRetentionDays(),
         ];
 
         return $helper->generateForm([
             $infoForm,
             $fileLoggingForm,
+            $clientLoggingForm,
             $cronForm,
         ]);
     }
@@ -488,6 +573,9 @@ class CollectLogs extends Module
         }
 
         $this->getTransformMessage()->synchronize();
+
+        $retentionDays = (int)$settings->getClientLoggingRetentionDays();
+        Db::getInstance()->delete('collectlogs_js_error', 'last_seen < DATE_SUB(NOW(), INTERVAL '.(int)$retentionDays.' DAY)');
 
         if (! $settings->getSendNewErrorsEmail()) {
             echo "Sending emails with new errors is disabled in module settings, exiting...\n";
@@ -614,6 +702,65 @@ class CollectLogs extends Module
         });
     }
 
+
+    /**
+     * @return void
+     * @throws PrestaShopException
+     */
+    public function hookHeader()
+    {
+        if ($this->context->controller instanceof AdminController) {
+            return;
+        }
+        $settings = $this->getSettings();
+        if (! $settings->getClientLoggingEnabled()) {
+            return;
+        }
+
+        if (method_exists($this->context->controller, 'registerJavascript')) {
+            $this->context->controller->registerJavascript(
+                'module-'.$this->name.'-client',
+                'modules/'.$this->name.'/views/js/client-logger.js',
+                ['position' => 'bottom', 'priority' => 150]
+            );
+        } else {
+            $this->context->controller->addJS($this->_path.'views/js/client-logger.js');
+        }
+
+        Media::addJsDef([
+            'collectlogsClientLogConfig' => [
+                'endpoint' => $this->context->link->getModuleLink($this->name, 'jslog', [], true),
+                'token' => $this->generateClientLogToken(),
+                'shop_id' => (int)$this->context->shop->id,
+                'sampling_rate' => (int)$settings->getClientLoggingSamplingRate(),
+                'max_events' => (int)$settings->getClientLoggingMaxEvents(),
+                'include_query' => (bool)$settings->getClientLoggingIncludeQueryString(),
+                'include_stack' => (bool)$settings->getClientLoggingIncludeStackTrace(),
+                'flush_interval_ms' => 5000,
+                'tb_version' => _TB_VERSION_,
+                'theme' => (string)$this->context->shop->theme_name,
+                'controller' => (string)Dispatcher::getInstance()->getController(),
+                'lang' => (string)$this->context->language->iso_code,
+                'currency' => (string)$this->context->currency->iso_code,
+            ],
+        ]);
+    }
+
+    /**
+     * @throws PrestaShopException
+     */
+    public function generateClientLogToken()
+    {
+        $payload = [
+            'id_shop' => (int)$this->context->shop->id,
+            'ts' => time(),
+            'nonce' => Tools::passwdGen(12),
+        ];
+        $encoded = base64_encode(json_encode($payload));
+        $signature = hash_hmac('sha256', $encoded, _COOKIE_KEY_);
+        return $encoded.'.'.$signature;
+    }
+
     /**
      * @return Settings
      */
@@ -651,6 +798,12 @@ class CollectLogs extends Module
             $settings->setLogToFile((bool)Tools::getValue(static::INPUT_LOG_TO_FILE));
             $settings->setLogToFileNewOnly((bool)Tools::getValue(static::INPUT_LOG_TO_FILE_NEW_ONLY));
             $settings->setLogToFileMinSeverity((int)Tools::getValue(static::INPUT_LOG_TO_FILE_SEVERITY));
+            $settings->setClientLoggingEnabled((bool)Tools::getValue(static::INPUT_CLIENT_LOGGING_ENABLED));
+            $settings->setClientLoggingSamplingRate((int)Tools::getValue(static::INPUT_CLIENT_LOGGING_SAMPLING));
+            $settings->setClientLoggingMaxEvents((int)Tools::getValue(static::INPUT_CLIENT_LOGGING_MAX_EVENTS));
+            $settings->setClientLoggingIncludeQueryString((bool)Tools::getValue(static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY));
+            $settings->setClientLoggingIncludeStackTrace((bool)Tools::getValue(static::INPUT_CLIENT_LOGGING_INCLUDE_STACK));
+            $settings->setClientLoggingRetentionDays((int)Tools::getValue(static::INPUT_CLIENT_LOGGING_RETENTION_DAYS));
             $this->getTransformMessage()->synchronize(true);
             $controller->confirmations[] = $this->l('Settings saved');
         }
