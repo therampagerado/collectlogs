@@ -1,61 +1,77 @@
 <div class="col-lg-12">
 
     <div class="panel">
-        <h3>{$row.error_type|escape:'html'}</h3>
-        <div class="panel-body">
-            <p>
-                <h4>{l s='Severity:' mod='collectlogs'}</h4>
-                {if $row.severity == 'fatal'}
-                    <span class="badge badge-critical">{$row.severity|escape:'html'}</span>
-                {elseif $row.severity == 'error'}
-                    <span class="badge badge-danger">{$row.severity|escape:'html'}</span>
-                {elseif $row.severity == 'warn'}
-                    <span class="badge badge-warning">{$row.severity|escape:'html'}</span>
-                {else}
-                    <span class="badge badge-info">{$row.severity|escape:'html'}</span>
-                {/if}
-            </p>
-            <br />
-            <p>
-                <h4>{l s='Message:' mod='collectlogs'}</h4>
-                <code>{$row.message|escape:'html'}</code>
-            </p>
-            <br />
-            <p>
-                <h4>{l s='Location:' mod='collectlogs'}</h4>
-                {if $row.script_url}
-                    <code>{$row.script_url|escape:'html'}</code>
-                    {if $row.line}
-                        &nbsp;line&nbsp;<code>{$row.line|intval}{if $row.col}:{$row.col|intval}{/if}</code>
-                    {/if}
-                {else}
-                    {l s='Unknown' mod='collectlogs'}
-                {/if}
-            </p>
-            <br />
-            <p>
-                <h4>{l s='Page URL:' mod='collectlogs'}</h4>
-                <a href="{$row.url|escape:'html'}" target="_blank" rel="noreferrer noopener">{$row.url|escape:'html'|truncate:120:'...'}</a>
-                {if $row.referrer}
-                    <br />
-                    <small>{l s='Referrer:' mod='collectlogs'} {$row.referrer|escape:'html'|truncate:120:'...'}</small>
-                {/if}
-            </p>
-            <br />
-            <p>
-                <h4>{l s='Statistics:' mod='collectlogs'}</h4>
-                {l s='Occurrences:' mod='collectlogs'} <strong>{$row.occurrences|intval}</strong>
-                &nbsp;&mdash;&nbsp;
-                {l s='First seen:' mod='collectlogs'} {$row.first_seen|escape:'html'}
-                &nbsp;&mdash;&nbsp;
-                {l s='Last seen:' mod='collectlogs'} {$row.last_seen|escape:'html'}
-            </p>
-            <br />
-            <p>
-                <h4>{l s='Fingerprint:' mod='collectlogs'}</h4>
-                <code>{$row.fingerprint|escape:'html'}</code>
-            </p>
-        </div>
+        <h3><i class="icon-warning-sign"></i> {l s='JS Error Detail' mod='collectlogs'}</h3>
+        <table class="table">
+            <tbody>
+                <tr>
+                    <th style="width:160px">{l s='Severity' mod='collectlogs'}</th>
+                    <td>
+                        {if $row.severity == 'fatal'}
+                            <span class="badge badge-critical">{$row.severity|escape:'html'}</span>
+                        {elseif $row.severity == 'error'}
+                            <span class="badge badge-danger">{$row.severity|escape:'html'}</span>
+                        {elseif $row.severity == 'warn'}
+                            <span class="badge badge-warning">{$row.severity|escape:'html'}</span>
+                        {else}
+                            <span class="badge badge-info">{$row.severity|escape:'html'}</span>
+                        {/if}
+                    </td>
+                </tr>
+                <tr>
+                    <th>{l s='Error type' mod='collectlogs'}</th>
+                    <td><code>{$row.error_type|escape:'html'}</code></td>
+                </tr>
+                <tr>
+                    <th>{l s='Message' mod='collectlogs'}</th>
+                    <td><code>{$row.message|escape:'html'}</code></td>
+                </tr>
+                <tr>
+                    <th>{l s='Page URL' mod='collectlogs'}</th>
+                    <td>
+                        <a href="{$row.url|escape:'html'}" target="_blank" rel="noreferrer noopener">{$row.url|escape:'html'}</a>
+                    </td>
+                </tr>
+                <tr>
+                    <th>{l s='Referrer' mod='collectlogs'}</th>
+                    <td>{if $row.referrer}{$row.referrer|escape:'html'}{else}-{/if}</td>
+                </tr>
+                <tr>
+                    <th>{l s='Script URL' mod='collectlogs'}</th>
+                    <td>{if $row.script_url}<code>{$row.script_url|escape:'html'}</code>{else}-{/if}</td>
+                </tr>
+                <tr>
+                    <th>{l s='Line / Column' mod='collectlogs'}</th>
+                    <td>
+                        {if $row.line}
+                            <code>{$row.line|intval}{if $row.col}:{$row.col|intval}{/if}</code>
+                        {else}
+                            -
+                        {/if}
+                    </td>
+                </tr>
+                <tr>
+                    <th>{l s='Occurrences' mod='collectlogs'}</th>
+                    <td>{$row.occurrences|intval}</td>
+                </tr>
+                <tr>
+                    <th>{l s='First seen' mod='collectlogs'}</th>
+                    <td>{$row.first_seen|escape:'html'}</td>
+                </tr>
+                <tr>
+                    <th>{l s='Last seen' mod='collectlogs'}</th>
+                    <td>{$row.last_seen|escape:'html'}</td>
+                </tr>
+                <tr>
+                    <th>{l s='Shop ID' mod='collectlogs'}</th>
+                    <td>{$row.id_shop|intval}</td>
+                </tr>
+                <tr>
+                    <th>{l s='Fingerprint' mod='collectlogs'}</th>
+                    <td><code>{$row.fingerprint|escape:'html'}</code></td>
+                </tr>
+            </tbody>
+        </table>
     </div>
 
     {if $row.user_agent}

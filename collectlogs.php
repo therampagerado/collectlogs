@@ -97,6 +97,7 @@ class CollectLogs extends Module
             $this->installTab() &&
             $this->installJsErrorsTab() &&
             $this->installDb($createTables) &&
+            $this->ensureJsErrorsTable() &&
             $this->registerHook('actionRegisterErrorHandlers') &&
             $this->registerHook('header') &&
             $this->registerHook('displayHeader')
@@ -125,8 +126,24 @@ class CollectLogs extends Module
      * @throws PrestaShopDatabaseException
      * @throws PrestaShopException
      */
-    private function installJsErrorsTab()
+    public function installJsErrorsTab()
     {
+        $legacyClassNames = ['AdminCollectLogsJSErrors', 'AdminCollectLogsJsError'];
+        foreach ($legacyClassNames as $legacyClassName) {
+            $legacyId = Tab::getIdFromClassName($legacyClassName);
+            if ($legacyId !== false) {
+                $legacyTab = new Tab((int)$legacyId);
+                $legacyTab->class_name = 'AdminCollectLogsJsErrors';
+                if ($legacyTab->id && $legacyTab->update()) {
+                    return true;
+                }
+            }
+        }
+
+        if (Tab::getIdFromClassName('AdminCollectLogsJsErrors') !== false) {
+            return true;
+        }
+
         // Place the tab as a sibling of AdminCollectLogsBackend (same parent),
         // not nested under it — the TB BO menu does not render a 3rd level.
         $parentId = 0;
@@ -175,6 +192,24 @@ class CollectLogs extends Module
             return true;
         }
         return $this->executeSqlScript('install');
+    }
+
+    /**
+     * Ensure JS error table exists (upgrade safety for stores that skipped
+     * the original JS-table migration).
+     *
+     * @return bool
+     * @throws PrestaShopDatabaseException
+     * @throws PrestaShopException
+     */
+    public function ensureJsErrorsTable()
+    {
+        $table = _DB_PREFIX_ . 'collectlogs_js_error';
+        $exists = (bool)Db::getInstance()->getValue("SHOW TABLES LIKE '" . pSQL($table) . "'");
+        if ($exists) {
+            return true;
+        }
+        return $this->executeSqlScript('version_1_4_0');
     }
 
     /**

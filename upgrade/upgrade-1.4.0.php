@@ -16,39 +16,18 @@
  */
 function upgrade_module_1_4_0($module)
 {
-    // Create the new JS error table
-    if (!$module->executeSqlScript('version_1_4_0')) {
+    // Create/repair the JS error table.
+    if (!$module->ensureJsErrorsTable()) {
         return false;
     }
 
-    // Register FO hooks needed for JS error logging
+    // Register FO hooks needed for JS error logging.
     $module->registerHook('header');
     $module->registerHook('displayHeader');
 
-    // Add the JS errors Back-Office tab if it does not already exist
-    if (Tab::getIdFromClassName('AdminCollectLogsJsErrors') === false) {
-        $parentId = 0;
-        $backendId = Tab::getIdFromClassName('AdminCollectLogsBackend');
-        if ($backendId !== false) {
-            $backendTab = new Tab((int)$backendId);
-            $parentId = (int)$backendTab->id_parent;
-        }
-        if (!$parentId) {
-            $parentId = (int)Tab::getIdFromClassName('AdminTools');
-        }
-
-        $tab = new Tab();
-        $tab->active     = 1;
-        $tab->class_name = 'AdminCollectLogsJsErrors';
-        $tab->module     = $module->name;
-        $tab->id_parent  = $parentId;
-        $tab->name       = [];
-        foreach (Language::getLanguages(true) as $lang) {
-            $tab->name[$lang['id_lang']] = 'JS Error logs';
-        }
-        if (!$tab->add()) {
-            return false;
-        }
+    // Ensure the JS Errors Back-Office tab exists and has the correct class name.
+    if (!$module->installJsErrorsTab()) {
+        return false;
     }
 
     return true;
