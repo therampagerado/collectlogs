@@ -19,19 +19,19 @@
                 <table class="table table-bordered table-striped table-condensed">
                     <tbody>
                         <tr>
-                            <th>{l s='Severity' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Severity' mod='collectlogs'}</th>
                             <td><span class="label {$severityClass}">{$row.severity|escape:'html'}</span></td>
                         </tr>
                         <tr>
-                            <th>{l s='Error type' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Error type' mod='collectlogs'}</th>
                             <td><code>{$row.error_type|default:'-'|escape:'html'}</code></td>
                         </tr>
                         <tr>
-                            <th>{l s='Message' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Message' mod='collectlogs'}</th>
                             <td><code>{$row.message|default:'-'|escape:'html'}</code></td>
                         </tr>
                         <tr>
-                            <th>{l s='Page URL' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Page URL' mod='collectlogs'}</th>
                             <td>
                                 {if $row.url}
                                     <a href="{$row.url|escape:'html'}" target="_blank" rel="noreferrer noopener">{$row.url|escape:'html'}</a>
@@ -41,11 +41,11 @@
                             </td>
                         </tr>
                         <tr>
-                            <th>{l s='Referrer' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Referrer' mod='collectlogs'}</th>
                             <td>{$row.referrer|default:'-'|escape:'html'}</td>
                         </tr>
                         <tr>
-                            <th>{l s='Script URL' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Script URL' mod='collectlogs'}</th>
                             <td>
                                 {if $row.script_url}
                                     <code>{$row.script_url|escape:'html'}</code>
@@ -55,7 +55,7 @@
                             </td>
                         </tr>
                         <tr>
-                            <th>{l s='Line / Column' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Line / Column' mod='collectlogs'}</th>
                             <td>
                                 {if $row.line}
                                     <code>{$row.line|intval}{if $row.col}:{$row.col|intval}{/if}</code>
@@ -65,23 +65,23 @@
                             </td>
                         </tr>
                         <tr>
-                            <th>{l s='Occurrences' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Occurrences' mod='collectlogs'}</th>
                             <td>{$row.occurrences|intval}</td>
                         </tr>
                         <tr>
-                            <th>{l s='First seen' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='First seen' mod='collectlogs'}</th>
                             <td>{$row.first_seen|default:'-'|escape:'html'}</td>
                         </tr>
                         <tr>
-                            <th>{l s='Last seen' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Last seen' mod='collectlogs'}</th>
                             <td>{$row.last_seen|default:'-'|escape:'html'}</td>
                         </tr>
                         <tr>
-                            <th>{l s='Shop ID' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Shop ID' mod='collectlogs'}</th>
                             <td>{$row.id_shop|intval}</td>
                         </tr>
                         <tr>
-                            <th>{l s='Fingerprint' mod='collectlogs'}</th>
+                            <th class="text-nowrap" style="width: 180px;">{l s='Fingerprint' mod='collectlogs'}</th>
                             <td><code>{$row.fingerprint|default:'-'|escape:'html'}</code></td>
                         </tr>
                     </tbody>
