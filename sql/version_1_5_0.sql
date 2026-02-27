@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS `PREFIX_collectlogs_js_error` (
+    `id_collectlogs_js_error` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT,
+    `id_shop` INT(11) UNSIGNED NOT NULL,
+    `id_lang` INT(11) UNSIGNED NULL,
+    `id_customer` INT(11) UNSIGNED NULL,
+    `customer_hash` CHAR(40) NULL,
+    `visitor_id` VARCHAR(128) NULL,
+    `ip_hash` CHAR(40) NULL,
+    `severity` ENUM('info','warn','error','fatal') NOT NULL DEFAULT 'error',
+    `message` TEXT NOT NULL,
+    `error_type` VARCHAR(120) NOT NULL,
+    `url` TEXT NOT NULL,
+    `referrer` TEXT NULL,
+    `user_agent` TEXT NOT NULL,
+    `dt_iso` DATETIME NOT NULL,
+    `stack_trace_json` LONGTEXT NULL,
+    `extra_json` LONGTEXT NULL,
+    `script_url` TEXT NULL,
+    `line` INT(11) NULL,
+    `column` INT(11) NULL,
+    `fingerprint` CHAR(40) NOT NULL,
+    `occurrences` INT(11) UNSIGNED NOT NULL DEFAULT 1,
+    `first_seen` DATETIME NOT NULL,
+    `last_seen` DATETIME NOT NULL,
+    `date_add` DATETIME NOT NULL,
+    PRIMARY KEY (`id_collectlogs_js_error`),
+    KEY `collectlogs_js_fingerprint` (`id_shop`, `fingerprint`, `last_seen`),
+    KEY `collectlogs_js_shop_seen` (`id_shop`, `last_seen`),
+    KEY `collectlogs_js_visitor` (`visitor_id`),
+    KEY `collectlogs_js_ip` (`ip_hash`)
+) ENGINE=ENGINE_TYPE DEFAULT CHARSET=CHARSET_TYPE COLLATE=COLLATE_TYPE;
+
+
+CREATE TABLE IF NOT EXISTS `PREFIX_collectlogs_js_rate_limit` (
+    `dimension` VARCHAR(96) NOT NULL,
+    `bucket` CHAR(12) NOT NULL,
+    `count` INT(11) UNSIGNED NOT NULL DEFAULT 1,
+    `date_add` DATETIME NOT NULL,
+    `date_upd` DATETIME NOT NULL,
+    PRIMARY KEY (`dimension`, `bucket`),
+    KEY `collectlogs_js_rate_bucket` (`bucket`)
+) ENGINE=ENGINE_TYPE DEFAULT CHARSET=CHARSET_TYPE COLLATE=COLLATE_TYPE;
