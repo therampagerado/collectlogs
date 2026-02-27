@@ -61,7 +61,7 @@ class CollectLogs extends Module
     {
         $this->name = 'collectlogs';
         $this->tab = 'administaration';
-        $this->version = '1.4.0';
+        $this->version = '1.4.1';
         $this->author = 'thirty bees';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -127,8 +127,15 @@ class CollectLogs extends Module
      */
     private function installJsErrorsTab()
     {
-        $parentId = Tab::getIdFromClassName('AdminCollectLogsBackend');
-        if ($parentId === false) {
+        // Place the tab as a sibling of AdminCollectLogsBackend (same parent),
+        // not nested under it — the TB BO menu does not render a 3rd level.
+        $parentId = 0;
+        $backendId = Tab::getIdFromClassName('AdminCollectLogsBackend');
+        if ($backendId !== false) {
+            $backendTab = new Tab((int)$backendId);
+            $parentId = (int)$backendTab->id_parent;
+        }
+        if (!$parentId) {
             $parentId = $this->getTabParent();
         }
 
