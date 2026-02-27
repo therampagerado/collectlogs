@@ -29,7 +29,6 @@ class CollectLogsJsLogModuleFrontController extends ModuleFrontController
         if (!is_array($payload) || empty($payload['token'])) {
             $this->respond(400, ['error' => 'invalid_payload']);
         }
-
         $this->visitorId = isset($payload['visitor_id']) ? (string)$payload['visitor_id'] : '';
 
         if (!$this->module->validateClientLogToken($payload['token'])) {
@@ -59,66 +58,35 @@ class CollectLogsJsLogModuleFrontController extends ModuleFrontController
 
     protected function allowRequestRate()
     {
-        $ipHash = sha1((string)Tools::getRemoteAddr());
-        $visitor = $this->sanitizeText($this->visitorId, 128);
-
-        // Enforce a per-IP budget and, when available, a per-visitor budget.
-        $allowed = $this->registerRateHit('ip:' . $ipHash, 50);
-        if ($allowed && $visitor) {
-            $allowed = $this->registerRateHit('visitor:' . sha1($visitor), 50);
-        }
-        return $allowed;
-    }
-
-    protected function registerRateHit($dimension, $maxPerMinute)
-    {
         $db = Db::getInstance();
-        $bucket = date('YmdHi');
-        $dimension = pSQL($dimension);
-        $bucketSql = pSQL($bucket);
-
-        $sql = 'INSERT INTO `' . _DB_PREFIX_ . "collectlogs_js_rate_limit` (`dimension`,`bucket`,`count`,`date_add`,`date_upd`) VALUES ('" . $dimension . "','" . $bucketSql . "',1,NOW(),NOW()) ON DUPLICATE KEY UPDATE `count` = `count` + 1, `date_upd` = NOW()";
-        if (!$db->execute($sql)) {
-            return false;
+        $ip = (string)Tools::getRemoteAddr();
+        $ipHash = pSQL(sha1($ip));
+        $visitor = pSQL($this->sanitizeText($this->visitorId, 128));
+        $where = "date_add >= DATE_SUB(NOW(), INTERVAL 1 MINUTE) AND ip_hash = '" . $ipHash . "'";
+        if ($visitor) {
+            $where .= " AND visitor_id = '" . $visitor . "'";
         }
-
-        // Keep table bounded; delete buckets older than 2 hours.
-        $db->delete('collectlogs_js_rate_limit', "bucket < '" . pSQL(date('YmdHi', time() - 7200)) . "'");
-
-        $count = (int)$db->getValue((new DbQuery())
-            ->select('`count`')
-            ->from('collectlogs_js_rate_limit')
-            ->where("dimension = '" . $dimension . "'")
-            ->where("bucket = '" . $bucketSql . "'"));
-
-        return $count <= (int)$maxPerMinute;
+        $count = (int)$db->getValue((new DbQuery())->select('COUNT(1)')->from('collectlogs_js_error')->where($where));
+        return $count < 50;
     }
 
     protected function storeEvent(array $event)
     {
         $db = Db::getInstance();
-        $includeQueryString = (bool)$this->module->getSettings()->getClientLoggingIncludeQueryString();
-
         $message = $this->sanitizeText(isset($event['message']) ? $event['message'] : '');
         $type = $this->sanitizeText(isset($event['type']) ? $event['type'] : 'runtime', 120);
         $severity = $this->sanitizeSeverity(isset($event['severity']) ? $event['severity'] : 'error');
-        $url = $this->sanitizeUrl(isset($event['url']) ? $event['url'] : '', $includeQueryString);
-        $referrer = $this->sanitizeUrl(isset($event['referrer']) ? $event['referrer'] : '', $includeQueryString);
+        $url = $this->sanitizeUrl(isset($event['url']) ? $event['url'] : '');
+        $referrer = $this->sanitizeUrl(isset($event['referrer']) ? $event['referrer'] : '');
         $ua = $this->sanitizeText((string)Tools::getUserAgent(), 1024);
         $stack = isset($event['stack_trace']) && is_array($event['stack_trace']) ? $event['stack_trace'] : [];
-        $stackJson = json_encode($stack);
-        if ($stackJson === false) {
-            $stackJson = '[]';
-        }
+        $stackJson = pSQL(json_encode($stack));
         $extra = [
             'meta' => isset($event['meta']) ? $event['meta'] : [],
             'tags' => isset($event['tags']) ? $event['tags'] : [],
         ];
-        $extraJson = json_encode($extra);
-        if ($extraJson === false) {
-            $extraJson = '{}';
-        }
-        $scriptUrl = $this->sanitizeUrl(isset($event['script_url']) ? $event['script_url'] : '', $includeQueryString);
+        $extraJson = pSQL(json_encode($extra));
+        $scriptUrl = $this->sanitizeUrl(isset($event['script_url']) ? $event['script_url'] : '');
         $line = isset($event['line']) ? (int)$event['line'] : null;
         $column = isset($event['column']) ? (int)$event['column'] : null;
         $idShop = (int)$this->context->shop->id;
@@ -132,9 +100,9 @@ class CollectLogsJsLogModuleFrontController extends ModuleFrontController
         $existing = $db->getRow((new DbQuery())
             ->select('id_collectlogs_js_error')
             ->from('collectlogs_js_error')
-            ->where('id_shop = ' . $idShop)
+            ->where("id_shop = $idShop")
             ->where("fingerprint = '" . pSQL($fingerprint) . "'")
-            ->where('last_seen >= DATE_SUB(NOW(), INTERVAL 12 HOUR)')
+            ->where("last_seen >= DATE_SUB(NOW(), INTERVAL 12 HOUR)")
             ->orderBy('id_collectlogs_js_error DESC'));
 
         if ($existing) {
@@ -183,7 +151,7 @@ class CollectLogsJsLogModuleFrontController extends ModuleFrontController
         return Tools::substr($value, 0, $limit);
     }
 
-    protected function sanitizeUrl($url, $includeQueryString = false)
+    protected function sanitizeUrl($url)
     {
         $url = $this->sanitizeText($url, 2000);
         $parts = @parse_url($url);
@@ -191,8 +159,7 @@ class CollectLogsJsLogModuleFrontController extends ModuleFrontController
             return '';
         }
         $path = isset($parts['path']) ? $parts['path'] : '';
-        $query = ($includeQueryString && !empty($parts['query'])) ? ('?' . $parts['query']) : '';
-        return $parts['scheme'] . '://' . $parts['host'] . $path . $query;
+        return $parts['scheme'] . '://' . $parts['host'] . $path;
     }
 
     protected function respond($status, array $body)
