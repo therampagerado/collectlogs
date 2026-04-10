@@ -50,7 +50,7 @@ class CollectLogsCronModuleFrontController extends ModuleFrontController
             if (! $interactive) {
                 ob_start();
 
-                echo $this->module->name . ' cron';
+                echo $this->module->name . " cron\n";
                 header('Connection: close');
                 header('Content-Length: ' . ob_get_length());
 
