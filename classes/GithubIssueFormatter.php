@@ -149,6 +149,95 @@ class GithubIssueFormatter
         return $md;
     }
 
+    /**
+     * Format client-side JS error details into markdown suitable for a GitHub issue.
+     *
+     * @param array $log
+     * @param array $stackFrames
+     * @param array $extra
+     * @return string
+     */
+    public function formatJsError(array $log, array $stackFrames, array $extra): string
+    {
+        $meta = isset($extra['meta']) && is_array($extra['meta']) ? $extra['meta'] : [];
+        $tags = $this->normalizeJsTags(isset($extra['tags']) && is_array($extra['tags']) ? $extra['tags'] : []);
+        $sourceExcerpt = isset($extra['source_excerpt']) && is_array($extra['source_excerpt']) ? $extra['source_excerpt'] : [];
+
+        $md  = "# JS error report\n\n";
+        $md .= '- **Severity:** ' . $this->sanitize((string)($log['severity'] ?? 'error')) . "\n";
+        $md .= '- **Type:** ' . $this->sanitize((string)($log['error_type'] ?? 'runtime')) . "\n";
+        $md .= '- **Occurrences:** ' . (int)($log['occurrences'] ?? 1) . "\n";
+        $md .= '- **First seen:** ' . $this->sanitize((string)($log['first_seen'] ?? '')) . "\n";
+        $md .= '- **Last seen:** ' . $this->sanitize((string)($log['last_seen'] ?? '')) . "\n\n";
+
+        $md .= "**Message:**\n\n";
+        $md .= "```\n" . $this->sanitize((string)($log['message'] ?? '')) . "\n```\n\n";
+
+        $location = '';
+        if (!empty($log['line'])) {
+            $location = (string)(int)$log['line'];
+            if (!empty($log['column'])) {
+                $location .= ':' . (int)$log['column'];
+            }
+        }
+
+        if (!empty($log['url'])) {
+            $md .= '- **Page URL:** `' . $this->sanitize((string)$log['url']) . "`\n";
+        }
+        if (!empty($log['referrer'])) {
+            $md .= '- **Referrer:** `' . $this->sanitize((string)$log['referrer']) . "`\n";
+        }
+        if (!empty($log['script_url'])) {
+            $md .= '- **Script URL:** `' . $this->sanitize((string)$log['script_url']) . "`\n";
+        }
+        if ($location !== '') {
+            $md .= '- **Location:** `' . $this->sanitize($location) . "`\n";
+        }
+        if (!empty($log['user_agent'])) {
+            $md .= '- **User agent:** `' . $this->sanitize((string)$log['user_agent']) . "`\n";
+        }
+        $md .= "\n";
+
+        if (!empty($tags)) {
+            $md .= "### Context tags\n\n";
+            $md .= "```json\n" . $this->sanitize($this->encodeJson($tags)) . "\n```\n\n";
+        }
+
+        if (!empty($meta)) {
+            $md .= "### Captured metadata\n\n";
+            $md .= "```json\n" . $this->sanitize($this->encodeJson($meta)) . "\n```\n\n";
+        }
+
+        if (!empty($sourceExcerpt['focus'])) {
+            $md .= "### Source context\n\n";
+            $md .= "```text\n" . $this->sanitize($this->formatJsSourceExcerpt($sourceExcerpt)) . "\n```\n\n";
+        }
+
+        if (!empty($stackFrames)) {
+            $md .= "### Stack trace\n\n";
+            $md .= "```text\n" . $this->sanitize($this->formatJsStackTrace($stackFrames)) . "\n```\n\n";
+        }
+
+        $additional = $extra;
+        unset($additional['meta'], $additional['tags'], $additional['breadcrumbs']);
+        if (!empty($additional)) {
+            $md .= "### Additional payload\n\n";
+            $md .= "```json\n" . $this->sanitize($this->encodeJson($additional)) . "\n```\n\n";
+        }
+
+        return $md;
+    }
+
+    /**
+     * @param array $tags
+     * @return array
+     */
+    private function normalizeJsTags(array $tags): array
+    {
+        unset($tags['tb_version'], $tags['tb_revision'], $tags['module_version'], $tags['theme']);
+        return $tags;
+    }
+
 	/** Replace any occurrence of the BO admin folder with [admin] */
 	private function maskAdminFolder(string $text): string
 	{
@@ -205,5 +294,95 @@ class GithubIssueFormatter
 
 		return $text;
 	}
+
+    /**
+     * @param array $stackFrames
+     * @return string
+     */
+    private function formatJsStackTrace(array $stackFrames): string
+    {
+        $lines = [];
+
+        foreach ($stackFrames as $index => $frame) {
+            if (!is_array($frame)) {
+                continue;
+            }
+
+            $function = trim((string)($frame['func'] ?? 'anonymous'));
+            $location = trim((string)($frame['url'] ?? ($frame['file'] ?? 'unknown')));
+
+            if (!empty($frame['line'])) {
+                $location .= ':' . (int)$frame['line'];
+                if (!empty($frame['column'])) {
+                    $location .= ':' . (int)$frame['column'];
+                }
+            }
+
+            $line = '#' . (int)$index . ' ' . $function . ' (' . $location . ')';
+
+            if (isset($frame['args']) && is_array($frame['args']) && !empty($frame['args'])) {
+                $line .= ' args=' . $this->encodeJson($frame['args']);
+            }
+
+            $lines[] = $line;
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param array $sourceExcerpt
+     * @return string
+     */
+    private function formatJsSourceExcerpt(array $sourceExcerpt): string
+    {
+        $location = '';
+        if (!empty($sourceExcerpt['line'])) {
+            $location = 'line ' . (int)$sourceExcerpt['line'];
+            if (!empty($sourceExcerpt['column'])) {
+                $location .= ', column ' . (int)$sourceExcerpt['column'];
+            }
+        }
+
+        $excerpt = '';
+        if (!empty($sourceExcerpt['has_prefix'])) {
+            $excerpt .= '...';
+        }
+        $excerpt .= (string)($sourceExcerpt['before'] ?? '');
+        $excerpt .= '[[[' . (string)($sourceExcerpt['focus'] ?? '') . ']]]';
+        $excerpt .= (string)($sourceExcerpt['after'] ?? '');
+        if (!empty($sourceExcerpt['has_suffix'])) {
+            $excerpt .= '...';
+        }
+
+        if (!empty($sourceExcerpt['source_url'])) {
+            $location .= ($location !== '' ? ' @ ' : '') . (string)$sourceExcerpt['source_url'];
+        }
+
+        if ($location !== '') {
+            return $location . "\n" . $excerpt;
+        }
+
+        return $excerpt;
+    }
+
+    /**
+     * @param mixed $data
+     * @return string
+     */
+    private function encodeJson($data): string
+    {
+        $flags = JSON_PRETTY_PRINT;
+        if (defined('JSON_UNESCAPED_SLASHES')) {
+            $flags |= JSON_UNESCAPED_SLASHES;
+        }
+
+        $encoded = json_encode($data, $flags);
+        if ($encoded === false) {
+            return '{}';
+        }
+
+        return $encoded;
+    }
 
 }

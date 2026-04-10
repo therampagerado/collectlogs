@@ -48,6 +48,7 @@ class CollectLogs extends Module
     const INPUT_CLIENT_LOGGING_MAX_EVENTS = 'CLIENT_LOGGING_MAX_EVENTS';
     const INPUT_CLIENT_LOGGING_INCLUDE_QUERY = 'CLIENT_LOGGING_INCLUDE_QUERY';
     const INPUT_CLIENT_LOGGING_INCLUDE_STACK = 'CLIENT_LOGGING_INCLUDE_STACK';
+    const INPUT_CLIENT_LOGGING_EXCLUDE_BOTS = 'CLIENT_LOGGING_EXCLUDE_BOTS';
     const INPUT_CLIENT_LOGGING_RETENTION_DAYS = 'CLIENT_LOGGING_RETENTION_DAYS';
     const ACTION_DELETE_ALL = 'ACTION_DELETE_ALL';
     const ACTION_SUBMIT_SETTINGS = 'ACTION_SUBMIT_SETTINGS';
@@ -188,28 +189,12 @@ class CollectLogs extends Module
         if (! $this->getSettings()->getClientLoggingEnabled()) {
             return;
         }
-        $token = $this->createClientLogToken();
-        $endpoint = $this->context->link->getModuleLink($this->name, 'jslog', [], true);
-        $controller = isset($this->context->controller->php_self) ? $this->context->controller->php_self : '';
-        $theme = isset($this->context->shop->theme_name) ? $this->context->shop->theme_name : '';
-
+        if ($this->shouldSkipClientLoggingForCurrentRequest()) {
+            return;
+        }
+        $config = $this->getClientLoggingConfig();
         Media::addJsDef([
-            'collectlogsClientConfig' => [
-                'endpoint' => $endpoint,
-                'token' => $token,
-                'shopId' => (int)$this->context->shop->id,
-                'sampleRate' => (int)$this->getSettings()->getClientLoggingSampleRate(),
-                'maxEventsPerPage' => (int)$this->getSettings()->getClientLoggingMaxEvents(),
-                'includeQueryString' => (bool)$this->getSettings()->getClientLoggingIncludeQueryString(),
-                'includeStackTrace' => (bool)$this->getSettings()->getClientLoggingIncludeStackTrace(),
-                'tags' => [
-                    'tb_version' => _TB_VERSION_,
-                    'theme' => $theme,
-                    'controller' => $controller,
-                    'lang' => isset($this->context->language->iso_code) ? $this->context->language->iso_code : null,
-                    'currency' => isset($this->context->currency->iso_code) ? $this->context->currency->iso_code : null,
-                ],
-            ],
+            'collectlogsClientConfig' => $config,
         ]);
         $this->context->controller->addJS($this->_path . 'views/js/collectlogs-client.js');
     }
@@ -221,7 +206,7 @@ class CollectLogs extends Module
             'ts' => time(),
             'nonce' => Tools::passwdGen(12),
         ];
-        $body = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
+        $body = $this->encodeClientLogTokenPayload($payload);
         $sig = sha1($body . '|' . _COOKIE_KEY_);
         return $body . '.' . $sig;
     }
@@ -232,15 +217,250 @@ class CollectLogs extends Module
             return false;
         }
         list($body, $sig) = explode('.', $token, 2);
-        if (sha1($body . '|' . _COOKIE_KEY_) !== $sig) {
+        if (! hash_equals(sha1($body . '|' . _COOKIE_KEY_), (string)$sig)) {
             return false;
         }
-        $payload = json_decode(base64_decode(strtr($body, '-_', '+/')), true);
+        $payload = $this->decodeClientLogTokenPayload($body);
         if (!is_array($payload) || (int)$payload['sid'] !== (int)$this->context->shop->id) {
             return false;
         }
         $ts = isset($payload['ts']) ? (int)$payload['ts'] : 0;
         return $ts > (time() - 7200) && $ts < (time() + 300);
+    }
+
+    /**
+     * @param array $payload
+     * @return string
+     */
+    protected function encodeClientLogTokenPayload(array $payload)
+    {
+        return rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
+    }
+
+    /**
+     * @param string $payload
+     * @return array|null
+     */
+    protected function decodeClientLogTokenPayload($payload)
+    {
+        $payload = (string)$payload;
+        if ($payload === '') {
+            return null;
+        }
+        $pad = strlen($payload) % 4;
+        if ($pad > 0) {
+            $payload .= str_repeat('=', 4 - $pad);
+        }
+        $json = base64_decode(strtr($payload, '-_', '+/'), true);
+        if (! is_string($json) || $json === '') {
+            return null;
+        }
+        $data = json_decode($json, true);
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * @return array
+     */
+    protected function getClientLoggingConfig()
+    {
+        $controller = isset($this->context->controller->php_self) ? $this->context->controller->php_self : '';
+        $theme = isset($this->context->shop->theme_name) ? $this->context->shop->theme_name : '';
+        $pageContext = $this->getClientPageContext();
+
+        return [
+            'endpoint' => $this->context->link->getModuleLink($this->name, 'jslog', [], true),
+            'token' => $this->createClientLogToken(),
+            'visitorStorageKey' => 'collectlogs-visitor-' . (int)$this->context->shop->id,
+            'shopId' => (int)$this->context->shop->id,
+            'sampleRate' => (int)$this->getSettings()->getClientLoggingSampleRate(),
+            'maxEventsPerPage' => (int)$this->getSettings()->getClientLoggingMaxEvents(),
+            'includeQueryString' => (bool)$this->getSettings()->getClientLoggingIncludeQueryString(),
+            'includeStackTrace' => (bool)$this->getSettings()->getClientLoggingIncludeStackTrace(),
+            'pageContext' => $pageContext,
+            'tags' => [
+                'build_id' => $this->getClientBuildId($theme),
+                'tb_version' => _TB_VERSION_,
+                'tb_revision' => $this->getClientTbRevision(),
+                'module_version' => $this->version,
+                'theme' => $theme,
+                'controller' => $controller,
+                'page_type' => $pageContext['page_type'],
+                'product_id' => $pageContext['product_id'],
+                'category_id' => $pageContext['category_id'],
+                'combination_id' => $pageContext['combination_id'],
+                'cart_count' => $pageContext['cart_count'],
+                'lang' => isset($this->context->language->iso_code) ? $this->context->language->iso_code : null,
+                'currency' => isset($this->context->currency->iso_code) ? $this->context->currency->iso_code : null,
+                'login_state' => $pageContext['login_state'],
+            ],
+        ];
+    }
+
+    /**
+     * @param string $theme
+     * @return string
+     */
+    protected function getClientBuildId($theme)
+    {
+        $parts = [];
+
+        $parts[] = 'tb-' . $this->normalizeBuildIdPart(_TB_VERSION_);
+        $tbRevision = $this->getClientTbRevision();
+        if ($tbRevision !== '') {
+            $parts[] = 'tb-revision-' . $this->normalizeBuildIdPart($tbRevision);
+        }
+        $parts[] = 'collectlogs-' . $this->normalizeBuildIdPart($this->version);
+
+        $theme = trim((string)$theme);
+        if ($theme !== '') {
+            $themeVersion = $this->detectThemeVersion($theme);
+            $themePart = 'theme-' . $this->normalizeBuildIdPart($theme);
+            if ($themeVersion !== '') {
+                $themePart .= '-v' . $this->normalizeBuildIdPart($themeVersion);
+            }
+            $parts[] = $themePart;
+        }
+
+        $clientFile = __DIR__ . DIRECTORY_SEPARATOR . 'views' . DIRECTORY_SEPARATOR . 'js' . DIRECTORY_SEPARATOR . 'collectlogs-client.js';
+        if (is_file($clientFile)) {
+            $mtime = @filemtime($clientFile);
+            if (is_int($mtime) && $mtime > 0) {
+                $parts[] = 'client-' . strtolower(base_convert((string)$mtime, 10, 36));
+            }
+        }
+
+        return implode('|', $parts);
+    }
+
+    /**
+     * @return string
+     */
+    protected function getClientTbRevision()
+    {
+        if (!defined('_TB_REVISION_')) {
+            return '';
+        }
+
+        $value = trim((string)_TB_REVISION_);
+        return $value !== '' ? $value : '';
+    }
+
+    /**
+     * @param string $value
+     * @return string
+     */
+    protected function normalizeBuildIdPart($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return 'na';
+        }
+
+        $value = preg_replace('/[^a-z0-9._-]+/i', '-', $value);
+        $value = preg_replace('/-+/', '-', (string)$value);
+        $value = trim((string)$value, '-');
+
+        return $value !== '' ? $value : 'na';
+    }
+
+    /**
+     * @return array
+     */
+    protected function getClientPageContext()
+    {
+        return [
+            'page_type' => isset($this->context->controller->php_self) ? (string)$this->context->controller->php_self : '',
+            'product_id' => $this->normalizeClientContextId(Tools::getValue('id_product')),
+            'category_id' => $this->normalizeClientContextId(Tools::getValue('id_category')),
+            'combination_id' => $this->normalizeClientContextId(Tools::getValue('id_product_attribute')),
+            'cart_count' => $this->getClientCartCount(),
+            'login_state' => $this->getClientLoginState(),
+            'lang' => isset($this->context->language->iso_code) ? (string)$this->context->language->iso_code : '',
+            'currency' => isset($this->context->currency->iso_code) ? (string)$this->context->currency->iso_code : '',
+        ];
+    }
+
+    /**
+     * @param mixed $value
+     * @return int|null
+     */
+    protected function normalizeClientContextId($value)
+    {
+        $value = (int)$value;
+        return $value > 0 ? $value : null;
+    }
+
+    /**
+     * @return int
+     */
+    protected function getClientCartCount()
+    {
+        if (!isset($this->context->cart) || !is_object($this->context->cart)) {
+            return 0;
+        }
+
+        if (method_exists($this->context->cart, 'nbProducts')) {
+            return (int)$this->context->cart->nbProducts();
+        }
+
+        if (method_exists($this->context->cart, 'getProducts')) {
+            $products = $this->context->cart->getProducts();
+            return is_array($products) ? count($products) : 0;
+        }
+
+        return 0;
+    }
+
+    /**
+     * @return string
+     */
+    protected function getClientLoginState()
+    {
+        if (isset($this->context->customer) && is_object($this->context->customer)) {
+            if (method_exists($this->context->customer, 'isLogged') && $this->context->customer->isLogged()) {
+                return 'logged_in';
+            }
+
+            if (!empty($this->context->customer->id)) {
+                return 'logged_in';
+            }
+        }
+
+        return 'guest';
+    }
+
+    /**
+     * @param string $theme
+     * @return string
+     */
+    protected function detectThemeVersion($theme)
+    {
+        $candidates = [
+            _PS_ALL_THEMES_DIR_ . $theme . DIRECTORY_SEPARATOR . 'config.xml',
+            _PS_ALL_THEMES_DIR_ . $theme . DIRECTORY_SEPARATOR . 'theme.yml',
+        ];
+
+        foreach ($candidates as $file) {
+            if (!is_file($file) || !is_readable($file)) {
+                continue;
+            }
+
+            $content = @file_get_contents($file);
+            if (!is_string($content) || $content === '') {
+                continue;
+            }
+
+            if (preg_match('/<version>\s*([^<]+)\s*<\/version>/i', $content, $matches)) {
+                return trim((string)$matches[1]);
+            }
+
+            if (preg_match('/^\s*version\s*:\s*(.+)$/mi', $content, $matches)) {
+                return trim((string)$matches[1], " \t\n\r\0\x0B'\"");
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -366,6 +586,7 @@ class CollectLogs extends Module
         ]);
         $errorsUrl = $this->context->link->getAdminLink('AdminCollectLogsBackend');
         $jsErrorsUrl = $this->context->link->getAdminLink('AdminCollectLogsJsBackend');
+        $crawlerDetectorAvailable = $this->isCrawlerDetectorAvailable();
         $errorsTable = $this->getErrorsTable();
         $buttons = null;
         if ($errorsTable) {
@@ -398,9 +619,8 @@ class CollectLogs extends Module
                         'name' => 'errors_table',
                         'type' => 'errors_table',
                         'errorTypes' => $errorsTable,
-                    ]
+                    ],
                 ],
-                'description' => ($description ? $description . '<br>' : '') . Translate::ppTags($this->l('Client-side JavaScript logs can be found in [1]Client JS logs[/1].'), ['<a href="'.$jsErrorsUrl.'">']),
                 'buttons' => $buttons
             ],
         ];
@@ -412,51 +632,6 @@ class CollectLogs extends Module
                     'icon' => 'icon-cogs',
                 ],
                 'input' => [
-                    [
-                        'type' => 'switch',
-                        'label' => $this->l('Enable client-side JS logging'),
-                        'name' => static::INPUT_CLIENT_LOGGING_ENABLED,
-                        'is_bool' => true,
-                        'values' => [
-                            ['id' => 'cl_enabled_on', 'value' => 1, 'label' => $this->l('Enabled')],
-                            ['id' => 'cl_enabled_off', 'value' => 0, 'label' => $this->l('Disabled')],
-                        ],
-                    ],
-                    [
-                        'type' => 'text',
-                        'label' => $this->l('Sampling rate (%)'),
-                        'name' => static::INPUT_CLIENT_LOGGING_SAMPLE_RATE,
-                    ],
-                    [
-                        'type' => 'text',
-                        'label' => $this->l('Max events per page'),
-                        'name' => static::INPUT_CLIENT_LOGGING_MAX_EVENTS,
-                    ],
-                    [
-                        'type' => 'switch',
-                        'label' => $this->l('Include query string'),
-                        'name' => static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY,
-                        'is_bool' => true,
-                        'values' => [
-                            ['id' => 'cl_q_on', 'value' => 1, 'label' => $this->l('Yes')],
-                            ['id' => 'cl_q_off', 'value' => 0, 'label' => $this->l('No')],
-                        ],
-                    ],
-                    [
-                        'type' => 'switch',
-                        'label' => $this->l('Include stack trace'),
-                        'name' => static::INPUT_CLIENT_LOGGING_INCLUDE_STACK,
-                        'is_bool' => true,
-                        'values' => [
-                            ['id' => 'cl_s_on', 'value' => 1, 'label' => $this->l('Yes')],
-                            ['id' => 'cl_s_off', 'value' => 0, 'label' => $this->l('No')],
-                        ],
-                    ],
-                    [
-                        'type' => 'text',
-                        'label' => $this->l('Retention (days)'),
-                        'name' => static::INPUT_CLIENT_LOGGING_RETENTION_DAYS,
-                    ],
                     [
                         'type' => 'switch',
                         'label' => $this->l('Log to file'),
@@ -513,6 +688,103 @@ class CollectLogs extends Module
                     ],
 
                 ],
+                'submit' => [
+                    'title' => $this->l('Save'),
+                    'name' => static::ACTION_SUBMIT_SETTINGS,
+                ],
+            ],
+        ];
+
+        $jsLoggingInputs = [
+            [
+                'type' => 'switch',
+                'label' => $this->l('Enable client-side JS logging'),
+                'name' => static::INPUT_CLIENT_LOGGING_ENABLED,
+                'is_bool' => true,
+                'values' => [
+                    ['id' => 'cl_enabled_on', 'value' => 1, 'label' => $this->l('Enabled')],
+                    ['id' => 'cl_enabled_off', 'value' => 0, 'label' => $this->l('Disabled')],
+                ],
+            ],
+            [
+                'type' => 'text',
+                'label' => $this->l('Sampling rate'),
+                'name' => static::INPUT_CLIENT_LOGGING_SAMPLE_RATE,
+                'class' => 'fixed-width-sm',
+                'suffix' => '%',
+            ],
+            [
+                'type' => 'text',
+                'label' => $this->l('Max events per page'),
+                'name' => static::INPUT_CLIENT_LOGGING_MAX_EVENTS,
+                'class' => 'fixed-width-sm',
+            ],
+            [
+                'type' => 'switch',
+                'label' => $this->l('Include query string'),
+                'name' => static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY,
+                'is_bool' => true,
+                'values' => [
+                    ['id' => 'cl_q_on', 'value' => 1, 'label' => $this->l('Yes')],
+                    ['id' => 'cl_q_off', 'value' => 0, 'label' => $this->l('No')],
+                ],
+            ],
+            [
+                'type' => 'switch',
+                'label' => $this->l('Include stack trace'),
+                'name' => static::INPUT_CLIENT_LOGGING_INCLUDE_STACK,
+                'is_bool' => true,
+                'values' => [
+                    ['id' => 'cl_s_on', 'value' => 1, 'label' => $this->l('Yes')],
+                    ['id' => 'cl_s_off', 'value' => 0, 'label' => $this->l('No')],
+                ],
+            ],
+            [
+                'type' => 'switch',
+                'label' => $this->l('Exclude detected crawlers'),
+                'name' => static::INPUT_CLIENT_LOGGING_EXCLUDE_BOTS,
+                'is_bool' => true,
+                'disabled' => !$crawlerDetectorAvailable,
+                'desc' => $crawlerDetectorAvailable
+                    ? $this->l('Uses the Detect crawlers module (`tbdetectcrawler`) to skip storing client-side JS logs for detected bots.')
+                    : $this->l('This option is available after the Detect crawlers module (`tbdetectcrawler`) is installed and enabled.'),
+                'values' => [
+                    ['id' => 'cl_bots_on', 'value' => 1, 'label' => $this->l('Yes')],
+                    ['id' => 'cl_bots_off', 'value' => 0, 'label' => $this->l('No')],
+                ],
+            ],
+            [
+                'type' => 'text',
+                'label' => $this->l('Retention'),
+                'name' => static::INPUT_CLIENT_LOGGING_RETENTION_DAYS,
+                'class' => 'fixed-width-sm',
+                'suffix' => $this->l('days'),
+                'desc' => $this->l('Old client-side JS logs are pruned by the module cron. Set to 0 to disable pruning. Activate the module cron URL for this retention setting to take effect.'),
+            ],
+        ];
+
+        if (!$crawlerDetectorAvailable) {
+            array_splice($jsLoggingInputs, 1, 0, [[
+                'type' => 'html',
+                'label' => $this->l('Crawler detection'),
+                'name' => 'COLLECTLOGS_CLIENT_LOGGING_EXCLUDE_BOTS_NOTICE',
+                'html_content' => "<div class='alert alert-info' style='margin-bottom:0;'>"
+                    . $this->l('Install and enable the Detect crawlers module (`tbdetectcrawler`) to enable bot exclusion for client-side JS logs.')
+                    . '</div>',
+            ]]);
+        }
+
+        $jsLoggingForm = [
+            'form' => [
+                'legend' => [
+                    'title' => $this->l('Client-side JS logging'),
+                    'icon' => 'icon-code',
+                ],
+                'description' => Translate::ppTags(
+                    $this->l('Captured browser-side JavaScript errors are available in [1]Client JS logs[/1].'),
+                    ['<a href="'.$jsErrorsUrl.'">']
+                ),
+                'input' => $jsLoggingInputs,
                 'submit' => [
                     'title' => $this->l('Save'),
                     'name' => static::ACTION_SUBMIT_SETTINGS,
@@ -596,12 +868,14 @@ class CollectLogs extends Module
             static::INPUT_CLIENT_LOGGING_MAX_EVENTS => $settings->getClientLoggingMaxEvents(),
             static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY => $settings->getClientLoggingIncludeQueryString(),
             static::INPUT_CLIENT_LOGGING_INCLUDE_STACK => $settings->getClientLoggingIncludeStackTrace(),
+            static::INPUT_CLIENT_LOGGING_EXCLUDE_BOTS => $settings->getClientLoggingExcludeBots(),
             static::INPUT_CLIENT_LOGGING_RETENTION_DAYS => $settings->getClientLoggingRetentionDays(),
         ];
 
         return $helper->generateForm([
             $infoForm,
             $fileLoggingForm,
+            $jsLoggingForm,
             $cronForm,
         ]);
     }
@@ -614,12 +888,18 @@ class CollectLogs extends Module
     public function processCron()
     {
         $settings = $this->getSettings();
+        $retentionDays = (int)$settings->getClientLoggingRetentionDays();
         if (! headers_sent()) {
             header('Content-Type: text/plain');
         }
 
         $this->getTransformMessage()->synchronize();
         $this->pruneClientJsLogs();
+        if ($retentionDays > 0) {
+            echo "Old client-side JS errors pruned.\n";
+        } else {
+            echo "Client-side JS error pruning disabled.\n";
+        }
 
         if (! $settings->getSendNewErrorsEmail()) {
             echo "Sending emails with new errors is disabled in module settings, exiting...\n";
@@ -797,10 +1077,61 @@ class CollectLogs extends Module
             $settings->setClientLoggingMaxEvents((int)Tools::getValue(static::INPUT_CLIENT_LOGGING_MAX_EVENTS));
             $settings->setClientLoggingIncludeQueryString((bool)Tools::getValue(static::INPUT_CLIENT_LOGGING_INCLUDE_QUERY));
             $settings->setClientLoggingIncludeStackTrace((bool)Tools::getValue(static::INPUT_CLIENT_LOGGING_INCLUDE_STACK));
+            if ($this->isCrawlerDetectorAvailable()) {
+                $settings->setClientLoggingExcludeBots((bool)Tools::getValue(static::INPUT_CLIENT_LOGGING_EXCLUDE_BOTS));
+            }
             $settings->setClientLoggingRetentionDays((int)Tools::getValue(static::INPUT_CLIENT_LOGGING_RETENTION_DAYS));
             $this->getTransformMessage()->synchronize(true);
             $controller->confirmations[] = $this->l('Settings saved');
         }
+    }
+
+    public function shouldSkipClientLoggingForCurrentRequest()
+    {
+        return $this->getSettings()->getClientLoggingExcludeBots() && $this->isCurrentRequestCrawler();
+    }
+
+    public function isCurrentRequestCrawler()
+    {
+        $crawlerModule = $this->getCrawlerDetectorModule();
+        if (! $crawlerModule) {
+            return false;
+        }
+
+        try {
+            return (bool)$crawlerModule->hookActionDetectBot();
+        } catch (Throwable $e) {
+            PrestaShopLogger::addLog('collectlogs crawler detection failed: ' . $e->getMessage(), 2);
+            return false;
+        }
+    }
+
+    protected function isCrawlerDetectorAvailable()
+    {
+        return (bool)$this->getCrawlerDetectorModule();
+    }
+
+    protected function getCrawlerDetectorModule()
+    {
+        static $crawlerModule = null;
+        static $resolved = false;
+
+        if ($resolved) {
+            return $crawlerModule;
+        }
+        $resolved = true;
+
+        if (!Module::isInstalled('tbdetectcrawler') || !Module::isEnabled('tbdetectcrawler')) {
+            return null;
+        }
+
+        $module = Module::getInstanceByName('tbdetectcrawler');
+        if (!Validate::isLoadedObject($module) || !method_exists($module, 'hookActionDetectBot')) {
+            return null;
+        }
+
+        $crawlerModule = $module;
+        return $crawlerModule;
     }
 
     /**

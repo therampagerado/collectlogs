@@ -269,6 +269,7 @@ class Logger
                 ]);
             }
             $this->markErrorSeen($errorId);
+            return $errorId;
         }
         return 0;
     }

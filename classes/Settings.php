@@ -23,6 +23,7 @@ class Settings
     const SETTINGS_CLIENT_LOGGING_MAX_EVENTS = 'COLLECTLOGS_CLIENT_LOGGING_MAX_EVENTS';
     const SETTINGS_CLIENT_LOGGING_INCLUDE_QUERY = 'COLLECTLOGS_CLIENT_LOGGING_INCLUDE_QUERY';
     const SETTINGS_CLIENT_LOGGING_INCLUDE_STACK = 'COLLECTLOGS_CLIENT_LOGGING_INCLUDE_STACK';
+    const SETTINGS_CLIENT_LOGGING_EXCLUDE_BOTS = 'COLLECTLOGS_CLIENT_LOGGING_EXCLUDE_BOTS';
     const SETTINGS_CLIENT_LOGGING_RETENTION_DAYS = 'COLLECTLOGS_CLIENT_LOGGING_RETENTION_DAYS';
 
     /**
@@ -317,10 +318,20 @@ class Settings
         return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_INCLUDE_STACK, $value);
     }
 
+    public function getClientLoggingExcludeBots()
+    {
+        return $this->getBoolValue(static::SETTINGS_CLIENT_LOGGING_EXCLUDE_BOTS, false);
+    }
+
+    public function setClientLoggingExcludeBots($value)
+    {
+        return $this->setBoolValue(static::SETTINGS_CLIENT_LOGGING_EXCLUDE_BOTS, $value);
+    }
+
     public function getClientLoggingRetentionDays()
     {
         $value = (int)Configuration::getGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS);
-        if ($value < 1 || $value > 3650) {
+        if ($value < 0 || $value > 3650) {
             return $this->setClientLoggingRetentionDays(30);
         }
         return $value;
@@ -328,7 +339,7 @@ class Settings
 
     public function setClientLoggingRetentionDays($value)
     {
-        $value = max(1, min(3650, (int)$value));
+        $value = max(0, min(3650, (int)$value));
         Configuration::updateGlobalValue(static::SETTINGS_CLIENT_LOGGING_RETENTION_DAYS, $value);
         return $value;
     }
