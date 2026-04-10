@@ -100,6 +100,17 @@ class AdminCollectLogsJsBackendController extends ModuleAdminController
                 ]
             );
 
+            $this->page_header_toolbar_btn['copy_markdown'] = [
+                'icon' => 'process-icon-new',
+                'href' => '#',
+                'desc' => $this->l('Copy as markdown'),
+                'js' => 'if (window.collectlogsCopyMarkdown) { return window.collectlogsCopyMarkdown(\'collectlogs-markdown-copy-source\', \''
+                    . addslashes($this->l('Error markdown copied to clipboard.'))
+                    . '\', \''
+                    . addslashes($this->l('Failed to copy markdown. Please copy it manually from the hidden field.'))
+                    . '\'); } return false;',
+            ];
+
             $this->page_header_toolbar_btn['github_issue'] = [
                 'icon' => 'process-icon-new',
                 'href' => $href,
@@ -165,6 +176,7 @@ class AdminCollectLogsJsBackendController extends ModuleAdminController
         $template = $this->context->smarty->createTemplate(
             _PS_MODULE_DIR_ . 'collectlogs/views/templates/admin/collect_logs_backend/js-log-view.tpl'
         );
+        $markdownBody = $this->buildMarkdownBody($log, $stackFrames, $extra);
         $template->assign([
             'log' => $displayLog,
             'stackFrames' => $stackFrames,
@@ -173,6 +185,7 @@ class AdminCollectLogsJsBackendController extends ModuleAdminController
             'tags' => $tags,
             'sourceExcerpt' => $sourceExcerpt,
             'runtimeState' => $runtimeState,
+            'markdownBody' => $markdownBody,
         ]);
 
         return $template->fetch();
@@ -261,16 +274,7 @@ class AdminCollectLogsJsBackendController extends ModuleAdminController
 
         $stackFrames = $this->decodeJsonField($log['stack_trace_json'], []);
         $extra = $this->decodeJsonField($log['extra_json'], []);
-
-        list($adminSeg, $adminFsPath) = $this->detectAdminFolder();
-
-        $formatter = new GithubIssueFormatter(
-            $this->module->getTransformMessage(),
-            $adminSeg,
-            $adminFsPath
-        );
-
-        $body = $formatter->formatJsError($log, $stackFrames, $extra);
+        $body = $this->buildMarkdownBody($log, $stackFrames, $extra);
 
         $max = 7000;
         if (strlen($body) > $max) {
@@ -303,5 +307,18 @@ class AdminCollectLogsJsBackendController extends ModuleAdminController
         $seg = basename($fsPath);
 
         return [$seg, $fsPath];
+    }
+
+    protected function buildMarkdownBody(array $log, array $stackFrames, array $extra)
+    {
+        list($adminSeg, $adminFsPath) = $this->detectAdminFolder();
+
+        $formatter = new GithubIssueFormatter(
+            $this->module->getTransformMessage(),
+            $adminSeg,
+            $adminFsPath
+        );
+
+        return $formatter->formatJsError($log, $stackFrames, $extra);
     }
 }

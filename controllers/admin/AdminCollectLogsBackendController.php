@@ -194,8 +194,10 @@ class AdminCollectLogsBackendController extends ModuleAdminController
             ->where('id_collectlogs_logs = ' . $id)
         );
         $template = $this->createTemplate('log-view.tpl');
+        $markdownBody = $this->buildMarkdownBody($log, $extras);
         $template->assign($log);
         $template->assign('extraSections', $extras);
+        $template->assign('markdownBody', $markdownBody);
 
         return $template->fetch();
     }
@@ -237,6 +239,17 @@ class AdminCollectLogsBackendController extends ModuleAdminController
                     'create_github_issue'  => 1,
                 ]
             );
+
+            $this->page_header_toolbar_btn['copy_markdown'] = [
+                'icon' => 'process-icon-new',
+                'href' => '#',
+                'desc' => $this->l('Copy as markdown'),
+                'js' => 'if (window.collectlogsCopyMarkdown) { return window.collectlogsCopyMarkdown(\'collectlogs-markdown-copy-source\', \''
+                    . addslashes($this->l('Error markdown copied to clipboard.'))
+                    . '\', \''
+                    . addslashes($this->l('Failed to copy markdown. Please copy it manually from the hidden field.'))
+                    . '\'); } return false;',
+            ];
 
             $this->page_header_toolbar_btn['github_issue'] = [
                 'icon' => 'process-icon-new',
@@ -294,15 +307,7 @@ class AdminCollectLogsBackendController extends ModuleAdminController
             ->where('id_collectlogs_logs = '.$id)
         );
 
-        list($adminSeg, $adminFsPath) = $this->detectAdminFolder();
-
-        $transform = $this->module->getTransformMessage(); // returns the concrete implementation
-        $formatter = new GithubIssueFormatter(
-            $transform,
-            $adminSeg,
-            $adminFsPath
-        );
-        $body  = $formatter->format($log, $extras);
+        $body  = $this->buildMarkdownBody($log, $extras);
 
         // Keep URL reasonably short — trim if huge (browser URL limits vary)
         $max = 7000;
@@ -354,5 +359,23 @@ class AdminCollectLogsBackendController extends ModuleAdminController
         $fsPath = PS_ADMIN_DIR;
         $seg = basename($fsPath);
         return [$seg, $fsPath];
+    }
+
+    /**
+     * @param array $log
+     * @param array $extras
+     * @return string
+     */
+    protected function buildMarkdownBody(array $log, array $extras)
+    {
+        list($adminSeg, $adminFsPath) = $this->detectAdminFolder();
+
+        $formatter = new GithubIssueFormatter(
+            $this->module->getTransformMessage(),
+            $adminSeg,
+            $adminFsPath
+        );
+
+        return $formatter->format($log, $extras);
     }
 }

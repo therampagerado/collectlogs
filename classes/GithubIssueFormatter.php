@@ -182,13 +182,13 @@ class GithubIssueFormatter
         }
 
         if (!empty($log['url'])) {
-            $md .= '- **Page URL:** `' . $this->sanitize((string)$log['url']) . "`\n";
+            $md .= '- **Page URL:** `' . $this->sanitize($this->decodeUrlForMarkdown((string)$log['url'])) . "`\n";
         }
         if (!empty($log['referrer'])) {
-            $md .= '- **Referrer:** `' . $this->sanitize((string)$log['referrer']) . "`\n";
+            $md .= '- **Referrer:** `' . $this->sanitize($this->decodeUrlForMarkdown((string)$log['referrer'])) . "`\n";
         }
         if (!empty($log['script_url'])) {
-            $md .= '- **Script URL:** `' . $this->sanitize((string)$log['script_url']) . "`\n";
+            $md .= '- **Script URL:** `' . $this->sanitize($this->decodeUrlForMarkdown((string)$log['script_url'])) . "`\n";
         }
         if ($location !== '') {
             $md .= '- **Location:** `' . $this->sanitize($location) . "`\n";
@@ -309,7 +309,7 @@ class GithubIssueFormatter
             }
 
             $function = trim((string)($frame['func'] ?? 'anonymous'));
-            $location = trim((string)($frame['url'] ?? ($frame['file'] ?? 'unknown')));
+            $location = trim($this->decodeUrlForMarkdown((string)($frame['url'] ?? ($frame['file'] ?? 'unknown'))));
 
             if (!empty($frame['line'])) {
                 $location .= ':' . (int)$frame['line'];
@@ -356,7 +356,7 @@ class GithubIssueFormatter
         }
 
         if (!empty($sourceExcerpt['source_url'])) {
-            $location .= ($location !== '' ? ' @ ' : '') . (string)$sourceExcerpt['source_url'];
+            $location .= ($location !== '' ? ' @ ' : '') . $this->decodeUrlForMarkdown((string)$sourceExcerpt['source_url']);
         }
 
         if ($location !== '') {
@@ -383,6 +383,20 @@ class GithubIssueFormatter
         }
 
         return $encoded;
+    }
+
+    /**
+     * @param string $value
+     * @return string
+     */
+    private function decodeUrlForMarkdown(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        $decoded = rawurldecode($value);
+        return is_string($decoded) ? $decoded : $value;
     }
 
 }
